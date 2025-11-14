@@ -84,6 +84,7 @@
         // 激活会话
         [audioSession setActive:YES error:&sessionError];
         _apWrapper = [[AudioProcessingWrapper alloc] init];
+        ///默认设置为降噪最高
         [_apWrapper setNoiseSuppressionLevel:NoiseSuppressionLevelVeryHigh];
         _engine = [[AVAudioEngine alloc] init];
         _accumulator = [[NSMutableData alloc] init];
