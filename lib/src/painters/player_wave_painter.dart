@@ -61,7 +61,11 @@ class PlayerWavePainter extends CustomPainter {
       lineX = _drawFitWidthLine(size, canvas);
     }
     // 在拖拽时绘制渐变遮罩，确保遮罩覆盖在波形上
-    if (dragSeekLinePosition != null && lineX != null && lineX > 0) {
+    if (dragSeekLinePosition != null &&
+        lineX != null &&
+        lineX > 0 &&
+        callPushback) {
+      print("callPushback  变化  $callPushback");
       _drawDragGradientMask(size, canvas, lineX);
     }
   }
@@ -111,8 +115,8 @@ class PlayerWavePainter extends CustomPainter {
       begin: Alignment.centerLeft,
       end: Alignment.centerRight,
       colors: [
-        Colors.white.withOpacity(0.9),
-        Colors.blue.withOpacity(1),
+        Color(0xFF99C8D7).withAlpha(0),
+        Color(0xFF99C8D7).withAlpha(102),
       ],
       stops: const [0.0, 1.0],
     );
@@ -132,6 +136,7 @@ class PlayerWavePainter extends CustomPainter {
 
   void _drawWave(Size size, Canvas canvas) {
     final length = waveformData.length;
+
     final halfWidth = size.width * 0.5;
     final halfHeight = size.height * 0.5;
     if (cachedAudioProgress != audioProgress) {
@@ -144,6 +149,7 @@ class PlayerWavePainter extends CustomPainter {
           currentDragPointer +
           emptySpace +
           (waveformType.isFitWidth ? 0 : halfWidth);
+      // 移除除以2的操作，让波形更明显
       final waveHeight = (waveformData[i] * animValue) *
           playerWaveStyle.scaleFactor *
           scrollScale;

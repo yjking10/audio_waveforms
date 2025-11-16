@@ -178,6 +178,7 @@ class _AudioWaveformsState extends State<AudioWaveforms> {
 
   ///This will help-out to determine to get direction of the scroll
   void _handleHorizontalDragStart(DragStartDetails details) {
+  
     _initialOffsetPosition = details.globalPosition.dx;
   }
 

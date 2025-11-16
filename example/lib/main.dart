@@ -122,12 +122,12 @@ class _HomeState extends State<Home> {
                   const SizedBox(height: 20),
                   Expanded(
                     child: ListView.builder(
-                      itemCount: 5,
+                      itemCount: 1,
                       itemBuilder: (_, index) {
                         return WaveBubble(
-                          index: index + 1,
+                          index: 4,
                           isSender: index.isOdd,
-                          width: MediaQuery.of(context).size.width / 2,
+                          // width: MediaQuery.of(context).size.width / 2,
                           appDirectory: appDirectory,
                         );
                       },

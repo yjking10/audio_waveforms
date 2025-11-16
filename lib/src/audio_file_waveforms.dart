@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 
@@ -289,9 +290,9 @@ class _AudioFileWaveformsState extends State<AudioFileWaveforms>
     scrollScale = 1.0;
 
     // Clear drag seek line position for fitWidth mode
-    // if (widget.waveformType.isFitWidth) {
-    //   _dragSeekLinePosition = null;
-    // }
+    if (widget.waveformType.isFitWidth) {
+      _dragSeekLinePosition = null;
+    }
 
     if (mounted) setState(() {});
 
@@ -304,28 +305,67 @@ class _AudioFileWaveformsState extends State<AudioFileWaveforms>
   }
 
   void _addWaveformData(List<double> data) {
-    // Calculate target size based on widget width and spacing
-    final targetSize = _calculateTargetWaveformSize();
+    if (data.isEmpty) {
+      _waveformData.clear();
+      if (mounted) setState(() {});
+      return;
+    }
 
-    // Resize waveform data to fixed target size
-    final resizedData = resizeWaveformData(data, targetSize);
+
+    // 使用增强的归一化算法，使波形更明显
+    final normalizedData = _normalizeWaveformData(data);
+
 
     _waveformData
       ..clear()
-      ..addAll(resizedData);
+      ..addAll(normalizedData);
+
     if (mounted) setState(() {});
   }
 
-  /// Calculates the target number of waveform samples based on widget size and spacing.
-  /// This ensures the waveform always fits exactly within the widget width.
-  int _calculateTargetWaveformSize() {
-    if (spacing <= 0) {
-      return 0;
+
+ 
+  /// 归一化波形数据到范围 [0.1, 1.0]
+  /// 最小值映射到0.1，最大值映射到1.0，其他值按比例线性映射
+  List<double> _normalizeWaveformData(List<double> data) {
+    if (data.isEmpty) {
+      return data;
     }
-    // Calculate how many waves can fit in the width
-    // Each wave takes up 'spacing' pixels
-    final targetSize = (widget.size.width / spacing).ceil();
-    return targetSize > 0 ? targetSize : 0;
+
+    // 找到最小值和最大值
+    double minValue = data[0];
+    double maxValue = data[0];
+    for (final value in data) {
+      if  (value < 0.01){
+        continue;
+      }
+      if (value < minValue) minValue = value;
+      if (value > maxValue) maxValue = value;
+    }
+
+    // 如果所有值都相同，返回中等值以确保可见性
+    if (maxValue == minValue) {
+      return List.filled(data.length, 0.55); // (0.1 + 1.0) / 2 = 0.55
+    }
+
+    // 计算数据范围
+    final range = maxValue - minValue;
+
+    // 目标范围
+    const double targetMin = 0;
+    const double targetMax = 1.0;
+    const double targetRange = targetMax - targetMin; // 
+
+    // 线性映射：最小值 -> 0, 最大值 -> 1.0
+    final normalized = data.map((value) {
+      // 计算在原始范围内的比例 [0, 1]
+      final double ratio = (value - minValue) / range;
+      // 映射到目标范围 [0, 1.0]
+      final double mappedValue = targetMin + ratio * targetRange;
+      return mappedValue.clamp(targetMin, targetMax);
+    }).toList();
+
+    return normalized;
   }
 
   void _handleDragGestures(DragUpdateDetails details) {
@@ -432,6 +472,7 @@ class _AudioFileWaveformsState extends State<AudioFileWaveforms>
 
   ///This will help-out to determine direction of the scroll
   void _handleHorizontalDragStart(DragStartDetails details) {
+    print("waveformExtraction.waveformData    ${_waveformData}");
     _initialDragPosition = details.localPosition.dx;
 
     // Initialize drag seek line position for fitWidth mode

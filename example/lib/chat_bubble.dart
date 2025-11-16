@@ -77,8 +77,13 @@ class _WaveBubbleState extends State<WaveBubble> {
   final playerWaveStyle = const PlayerWaveStyle(
     fixedWaveColor: Colors.white54,
     liveWaveColor: Colors.white,
-    spacing: 6,
-    scrollScale: 1.2
+    waveThickness: 1,
+    spacing: 2,
+    scaleFactor: 30,
+    // scaleFactor: 50,
+    
+    scrollScale: 1,
+    seekLineThickness: 1,
   );
 
   @override
@@ -88,10 +93,13 @@ class _WaveBubbleState extends State<WaveBubble> {
     _preparePlayer();
     playerStateSubscription = controller.onPlayerStateChanged.listen((_) {
       setState(() {});
+    
     });
   }
 
   void _preparePlayer() async {
+    print(
+        "playerWaveStyle--------${playerWaveStyle.getSamplesForWidth(widget.width ?? 200)}");
     // Opening file from assets folder
     if (widget.index != null) {
       file = File('${widget.appDirectory.path}/audio${widget.index}.mp3');
@@ -104,20 +112,20 @@ class _WaveBubbleState extends State<WaveBubble> {
       return;
     }
     // Prepare player with extracting waveform if index is even.
-    controller.preparePlayer(
-      path: widget.path ?? file!.path,
-      shouldExtractWaveform: widget.index?.isEven ?? true,
-    );
+    await controller.preparePlayer(
+        path: widget.path ?? file!.path,
+        shouldExtractWaveform: true,
+        noOfSamples: playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width - 24));
+
     // Extracting waveform separately if index is odd.
-    if (widget.index?.isOdd ?? false) {
-      controller.waveformExtraction
-          .extractWaveformData(
-            path: widget.path ?? file!.path,
-            noOfSamples:
-                playerWaveStyle.getSamplesForWidth(widget.width ?? 200),
-          )
-          .then((waveformData) => debugPrint(waveformData.toString()));
-    }
+    // if (widget.index?.isOdd ?? false) {
+    // controller.waveformExtraction
+    //     .extractWaveformData(
+    //       path: widget.path ?? file!.path,
+    //       noOfSamples: playerWaveStyle.getSamplesForWidth(widget.width ?? 200),
+    //     )
+    //     .then((waveformData) => debugPrint(waveformData.toString()));
+    // }
   }
 
   @override
@@ -149,7 +157,7 @@ class _WaveBubbleState extends State<WaveBubble> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (!controller.playerState.isStopped)
+                  // if (!controller.playerState.isStopped)
                     // IconButton(
                     //   onPressed: () async {
                     //     controller.playerState.isPlaying
@@ -166,14 +174,16 @@ class _WaveBubbleState extends State<WaveBubble> {
                     //   splashColor: Colors.transparent,
                     //   highlightColor: Colors.transparent,
                     // ),
-                  AudioFileWaveforms(
-                    size: Size(MediaQuery.of(context).size.width / 2, 70),
-                    playerController: controller,
-                    waveformType: widget.index?.isOdd ?? false
-                        ? WaveformType.fitWidth
-                        : WaveformType.long,
-                    playerWaveStyle: playerWaveStyle,
-                  ),
+                    AudioFileWaveforms(
+                      size: Size(MediaQuery.of(context).size.width-24, 112),
+                      playerController: controller,
+                      animationCurve: Curves.decelerate,
+                      waveformType: 
+                      // widget.index?.isOdd ?? false
+                          WaveformType.fitWidth,
+                          // : WaveformType.long,
+                      playerWaveStyle: playerWaveStyle,
+                    ),
                   // if (widget.isSender) const SizedBox(width: 10),
                 ],
               ),

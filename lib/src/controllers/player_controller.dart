@@ -161,6 +161,8 @@ class PlayerController extends ChangeNotifier {
           waveformExtraction.waveformData
             ..clear()
             ..addAll(value);
+              print(
+              "controller 数据长度 ${value.length}");
           notifyListeners();
         },
       );

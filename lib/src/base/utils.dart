@@ -170,35 +170,36 @@ enum UpdateFrequency {
 }
 
 /// Resizes waveform data to a fixed target size.
-/// 
+///
 /// If the input data is smaller than target size, interpolates using average values.
 /// If the input data is larger than target size, downsamples by removing middle values.
-/// 
+///
 /// [data] - Original waveform data
 /// [targetSize] - Target number of samples
-/// 
+///
 /// Returns resized waveform data with exactly [targetSize] elements.
 List<double> resizeWaveformData(List<double> data, int targetSize) {
   if (data.isEmpty) {
     return List.filled(targetSize, 0.0);
   }
-  
+
   if (targetSize <= 0) {
     return [];
   }
-  
+
   final int sourceSize = data.length;
-  
+
   // If sizes match, return original data
   if (sourceSize == targetSize) {
     return List.from(data);
   }
-  
+
   // If source is smaller, interpolate
   if (sourceSize < targetSize) {
+    print("sourceSize   little   $sourceSize");
     return _interpolateWaveformData(data, targetSize);
   }
-  
+  print("sourceSize     $sourceSize");
   // If source is larger, downsample
   return _downsampleWaveformData(data, targetSize);
 }
@@ -208,62 +209,116 @@ List<double> _interpolateWaveformData(List<double> data, int targetSize) {
   final result = <double>[];
   final int sourceSize = data.length;
   final double ratio = (sourceSize - 1) / (targetSize - 1);
-  
+
   for (int i = 0; i < targetSize; i++) {
     final double sourceIndex = i * ratio;
     final int lowerIndex = sourceIndex.floor();
     final int upperIndex = (lowerIndex + 1).clamp(0, sourceSize - 1);
     final double fraction = sourceIndex - lowerIndex;
-    
+
     if (lowerIndex == upperIndex || fraction == 0) {
       result.add(data[lowerIndex]);
     } else {
       // Linear interpolation
-      final double interpolated = data[lowerIndex] * (1 - fraction) + 
-                                  data[upperIndex] * fraction;
+      final double interpolated =
+          data[lowerIndex] * (1 - fraction) + data[upperIndex] * fraction;
       result.add(interpolated);
     }
   }
-  
+
   return result;
 }
 
-/// Downsamples waveform data by uniformly removing middle values.
-/// Preserves first and last values, then evenly distributes remaining samples.
+/// Downsamples waveform data using RMS (Root Mean Square) and maximum value combination.
+/// This method enhances waveform visibility by preserving both energy and peaks.
 List<double> _downsampleWaveformData(List<double> data, int targetSize) {
   if (targetSize <= 0) {
     return [];
   }
-  
+
   if (targetSize == 1) {
-    // Return average of all values
-    final double average = data.reduce((a, b) => a + b) / data.length;
-    return [average];
+    // Use RMS value for better energy representation
+    final double sumSquares =
+        data.fold(0.0, (sum, value) => sum + value * value);
+    final double meanSquare = sumSquares / data.length;
+    final double rms = meanSquare > 0 ? meanSquare : 0.0;
+    return [rms];
   }
-  
+
   final result = <double>[];
   final int sourceSize = data.length;
-  
-  // Always include first value
-  result.add(data[0]);
-  
+
   if (targetSize == 2) {
-    // Only first and last
-    result.add(data[sourceSize - 1]);
+    // Use enhanced method for first half and second half
+    final int mid = sourceSize ~/ 2;
+    final double max1 = data.sublist(0, mid).reduce((a, b) => a > b ? a : b);
+    final double sumSquares1 =
+        data.sublist(0, mid).fold(0.0, (sum, value) => sum + value * value);
+    final double meanSquare1 = sumSquares1 / mid;
+    final double rms1 = meanSquare1 > 0 ? meanSquare1 : 0.0;
+    final double combined1 = rms1 * 0.5 + max1 * 0.5;
+
+    final double max2 = data.sublist(mid).reduce((a, b) => a > b ? a : b);
+    final double sumSquares2 =
+        data.sublist(mid).fold(0.0, (sum, value) => sum + value * value);
+    final double meanSquare2 = sumSquares2 / (sourceSize - mid);
+    final double rms2 = meanSquare2 > 0 ? meanSquare2 : 0.0;
+    final double combined2 = rms2 * 0.5 + max2 * 0.5;
+
+    result.add(combined1);
+    result.add(combined2);
     return result;
   }
-  
-  // Calculate step size for uniform sampling
-  final double step = (sourceSize - 1) / (targetSize - 1);
-  
-  // Sample uniformly, excluding first and last (already added)
-  for (int i = 1; i < targetSize - 1; i++) {
-    final int index = (i * step).round().clamp(0, sourceSize - 1);
-    result.add(data[index]);
+
+  // Calculate window size for each target sample
+  final double windowSize = sourceSize / targetSize;
+
+  // Sample by combining RMS and maximum value in each window
+  for (int i = 0; i < targetSize; i++) {
+    final int startIndex = (i * windowSize).floor();
+    final int endIndex = ((i + 1) * windowSize).floor().clamp(0, sourceSize);
+
+    if (startIndex >= sourceSize) {
+      break;
+    }
+
+    final int windowLength = endIndex - startIndex;
+    if (windowLength == 0) {
+      result.add(0.0);
+      continue;
+    }
+
+    // Calculate RMS (Root Mean Square) for energy representation
+    double sumSquares = 0.0;
+    double maxValue = data[startIndex];
+
+    for (int j = startIndex; j < endIndex; j++) {
+      final double value = data[j];
+      sumSquares += value * value;
+      if (value > maxValue) {
+        maxValue = value;
+      }
+    }
+
+    final double meanSquare = sumSquares / windowLength;
+    final double rms = meanSquare > 0 ? meanSquare : 0.0;
+
+    // Use more aggressive enhancement: prioritize maximum value heavily
+    // Combine RMS and maximum: use weighted average (30% RMS + 70% max)
+    // This better highlights peaks and makes waveform more visible
+    double combined = rms * 0.3 + maxValue * 0.7;
+
+    // Additional aggressive enhancement: apply power curve to boost values
+    // This makes the waveform significantly more visible
+    if (combined > 0) {
+      // Use square root to enhance smaller values, making them more visible
+      final double sqrtEnhanced = combined * 0.5 + (combined * combined) * 0.5;
+      // Further boost by applying a power curve
+      combined = sqrtEnhanced * 0.6 + (sqrtEnhanced * sqrtEnhanced) * 0.4;
+    }
+
+    result.add(combined);
   }
-  
-  // Always include last value
-  result.add(data[sourceSize - 1]);
-  
+
   return result;
 }
