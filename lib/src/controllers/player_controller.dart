@@ -161,8 +161,7 @@ class PlayerController extends ChangeNotifier {
           waveformExtraction.waveformData
             ..clear()
             ..addAll(value);
-              print(
-              "controller 数据长度 ${value.length}");
+          print("controller 数据长度 ${value.length}");
           notifyListeners();
         },
       );
@@ -231,8 +230,8 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<bool> setNoiseSuppressionLevel(int level) async {
-    final result =
-    await AudioWaveformsInterface.instance.setNoiseSuppressionLevel(level, playerKey);
+    final result = await AudioWaveformsInterface.instance
+        .setNoiseSuppressionLevel(level, playerKey);
     return result;
   }
 
@@ -244,6 +243,15 @@ class PlayerController extends ChangeNotifier {
     final result =
         await AudioWaveformsInterface.instance.setRate(rate, playerKey);
     return result;
+  }
+
+  /// Gets current playback rate for this player.
+  /// Returns the current playback rate, or 1.0 if rate is not available.
+  ///
+  /// Default to 1.0
+  Future<double> getRate() async {
+    final result = await AudioWaveformsInterface.instance.getRate(playerKey);
+    return result ?? 1.0;
   }
 
   /// Returns maximum duration for [DurationType.max] and

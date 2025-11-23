@@ -31,6 +31,7 @@ class Constants {
   static const String finishMode = "finishMode";
   static const String finishType = "finishType";
   static const String setRate = "setRate";
+  static const String getRate = "getRate";
   static const String rate = "rate";
   static const String rightVolume = "rightVolume";
   static const String getDuration = "getDuration";

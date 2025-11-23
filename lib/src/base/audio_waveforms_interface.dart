@@ -160,6 +160,14 @@ class AudioWaveformsInterface {
     return result ?? false;
   }
 
+  ///platform call to get rate
+  Future<double?> getRate(String key) async {
+    var result = await _methodChannel.invokeMethod(Constants.getRate, {
+      Constants.playerKey: key,
+    });
+    return result != null ? (result as num).toDouble() : null;
+  }
+
   ///platform call to seek audio at provided position
   Future<bool> seekTo(String key, int progress) async {
     var result = await _methodChannel.invokeMethod(Constants.seekTo,

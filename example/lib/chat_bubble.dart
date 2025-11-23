@@ -93,7 +93,7 @@ class _WaveBubbleState extends State<WaveBubble> {
     _preparePlayer();
     playerStateSubscription = controller.onPlayerStateChanged.listen((_) {
       setState(() {});
-    
+   
     });
   }
 

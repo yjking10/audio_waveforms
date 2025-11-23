@@ -167,6 +167,15 @@ class AudioPlayer: NSObject, NoiseCancelPlayerDelegate {
 
     }
 
+    func getRate(_ result: @escaping FlutterResult) {
+        if let player = player {
+            let rate = Double(player.rate)
+            result(rate)
+        } else {
+            result(1.0) // 默认返回 1.0
+        }
+    }
+
     func seekTo(_ time: Int?, _ result: @escaping FlutterResult) {
         if time != nil {
 

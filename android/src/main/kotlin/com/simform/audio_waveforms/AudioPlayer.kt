@@ -182,6 +182,15 @@ class AudioPlayer(
         }
     }
 
+    fun getRate(result: MethodChannel.Result) {
+        try {
+            val rate = player?.playbackParameters?.speed ?: 1.0f
+            result.success(rate.toDouble())
+        } catch (e: Exception) {
+            result.success(1.0)
+        }
+    }
+
     fun setFinishMode(result: MethodChannel.Result, releaseModeType: Int?) {
         try {
             when (releaseModeType) {
