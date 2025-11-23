@@ -72,6 +72,7 @@ struct Constants {
     static let stopExtraction = "stopExtraction"
     static let onAudioChunk = "onAudioChunk"
     static let bytes = "bytes"
+    static let getRate = "getRate"
 }
 
 
