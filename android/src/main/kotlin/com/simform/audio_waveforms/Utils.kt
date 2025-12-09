@@ -55,6 +55,7 @@ object Constants {
     const val setRate = "setRate"
     const val rate = "rate"
     const val getDuration = "getDuration"
+    const val getRate = "getRate"
     const val durationType = "durationType"
     const val playerKey = "playerKey"
     const val current = "current"

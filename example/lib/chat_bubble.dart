@@ -30,11 +30,8 @@ class ChatBubble extends StatelessWidget {
               Container(
                 decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
-                    color: isSender
-                        ? const Color(0xFF276bfd)
-                        : const Color(0xFF343145)),
-                padding: const EdgeInsets.only(
-                    bottom: 9, top: 8, left: 14, right: 12),
+                    color: isSender ? const Color(0xFF276bfd) : const Color(0xFF343145)),
+                padding: const EdgeInsets.only(bottom: 9, top: 8, left: 14, right: 12),
                 child: Text(
                   text,
                   style: const TextStyle(color: Colors.white, fontSize: 20),
@@ -81,7 +78,7 @@ class _WaveBubbleState extends State<WaveBubble> {
     spacing: 2,
     scaleFactor: 30,
     // scaleFactor: 50,
-    
+
     scrollScale: 1,
     seekLineThickness: 1,
   );
@@ -93,29 +90,38 @@ class _WaveBubbleState extends State<WaveBubble> {
     _preparePlayer();
     playerStateSubscription = controller.onPlayerStateChanged.listen((_) {
       setState(() {});
-   
     });
   }
 
   void _preparePlayer() async {
-    print(
-        "playerWaveStyle--------${playerWaveStyle.getSamplesForWidth(widget.width ?? 200)}");
-    // Opening file from assets folder
-    if (widget.index != null) {
-      file = File('${widget.appDirectory.path}/audio${widget.index}.mp3');
-      await file?.writeAsBytes(
-          (await rootBundle.load('assets/audios/audio${widget.index}.mp3'))
-              .buffer
-              .asUint8List());
+    print("playerWaveStyle--------${playerWaveStyle.getSamplesForWidth(widget.width ?? 200)}");
+
+    if (widget.index != null && widget.index! < 6) {
+      // Opening file from assets folder
+      if (widget.index != null) {
+        file = File('${widget.appDirectory.path}/audio${widget.index}.mp3');
+        await file?.writeAsBytes(
+            (await rootBundle.load('assets/audios/audio${widget.index}.mp3')).buffer.asUint8List());
+      }
+      if (widget.index == null && widget.path == null && file?.path == null) {
+        return;
+      }
+      // Prepare player with extracting waveform if index is even.
+      await controller.preparePlayer(
+          path: widget.path ?? file!.path,
+          shouldExtractWaveform: true,
+          noOfSamples: playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width - 24));
     }
-    if (widget.index == null && widget.path == null && file?.path == null) {
-      return;
+
+    if (widget.index == 5) {
+      file = File('${widget.appDirectory.path}/test.ogg');
+      await file
+          ?.writeAsBytes((await rootBundle.load('assets/audios/test.ogg')).buffer.asUint8List());
+      await controller.preparePlayer(
+          path: "",
+          shouldExtractWaveform: true,
+          noOfSamples: playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width - 24));
     }
-    // Prepare player with extracting waveform if index is even.
-    await controller.preparePlayer(
-        path: widget.path ?? file!.path,
-        shouldExtractWaveform: true,
-        noOfSamples: playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width - 24));
 
     // Extracting waveform separately if index is odd.
     // if (widget.index?.isOdd ?? false) {
@@ -139,8 +145,7 @@ class _WaveBubbleState extends State<WaveBubble> {
   Widget build(BuildContext context) {
     return widget.path != null || file?.path != null
         ? Align(
-            alignment:
-                widget.isSender ? Alignment.centerRight : Alignment.centerLeft,
+            alignment: widget.isSender ? Alignment.centerRight : Alignment.centerLeft,
             child: Container(
               padding: EdgeInsets.only(
                 bottom: 6,
@@ -150,40 +155,103 @@ class _WaveBubbleState extends State<WaveBubble> {
               margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
-                color: widget.isSender
-                    ? const Color(0xFF276bfd)
-                    : const Color(0xFF343145),
+                color: widget.isSender ? const Color(0xFF276bfd) : const Color(0xFF343145),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   // if (!controller.playerState.isStopped)
-                    // IconButton(
-                    //   onPressed: () async {
-                    //     controller.playerState.isPlaying
-                    //         ? await controller.pausePlayer()
-                    //         : await controller.startPlayer();
-                    //     controller.setFinishMode(finishMode: FinishMode.loop);
-                    //   },
-                    //   icon: Icon(
-                    //     controller.playerState.isPlaying
-                    //         ? Icons.stop
-                    //         : Icons.play_arrow,
-                    //   ),
-                    //   color: Colors.white,
-                    //   splashColor: Colors.transparent,
-                    //   highlightColor: Colors.transparent,
-                    // ),
-                    AudioFileWaveforms(
-                      size: Size(MediaQuery.of(context).size.width-24, 112),
-                      playerController: controller,
-                      animationCurve: Curves.decelerate,
-                      waveformType: 
-                      // widget.index?.isOdd ?? false
-                          WaveformType.fitWidth,
-                          // : WaveformType.long,
-                      playerWaveStyle: playerWaveStyle,
-                    ),
+                  // IconButton(
+                  //   onPressed: () async {
+                  //     controller.playerState.isPlaying
+                  //         ? await controller.pausePlayer()
+                  //         : await controller.startPlayer();
+                  //     controller.setFinishMode(finishMode: FinishMode.loop);
+                  //   },
+                  //   icon: Icon(
+                  //     controller.playerState.isPlaying
+                  //         ? Icons.stop
+                  //         : Icons.play_arrow,
+                  //   ),
+                  //   color: Colors.white,
+                  //   splashColor: Colors.transparent,
+                  //   highlightColor: Colors.transparent,
+                  // ),
+
+                  AudioFileWaveforms(
+                    size: Size(MediaQuery.of(context).size.width - 24, 112),
+                    playerController: controller,
+                    animationCurve: Curves.decelerate,
+                    waveformData: [
+                      0.010,
+                      0.010,
+                      0.064,
+                      0.010,
+                      0.119,
+                      0.064,
+                      0.010,
+                      0.064,
+                      0.010,
+                      0.010,
+                      0.064,
+                      0.228,
+                      0.174,
+                      0.064,
+                      0.283,
+                      0.500,
+                      0.228,
+                      0.064,
+                      0.392,
+                      0.174,
+                      0.283,
+                      0.064,
+                      0.228,
+                      0.174,
+                      0.392,
+                      0.064,
+                      0.283,
+                      0.228,
+                      0.174,
+                      0.500,
+                      0.392,
+                      0.283,
+                      0.228,
+                      0.174,
+                      0.064,
+                      0.010,
+                      0.010,
+                      0.010,
+                      0.064,
+                      0.010,
+                      0.283,
+                      0.064,
+                      0.228,
+                      0.174,
+                      0.392,
+                      0.283,
+                      0.500,
+                      0.500,
+                      0.392,
+                      0.228,
+                      0.064,
+                      0.283,
+                      0.174,
+                      0.392,
+                      0.228,
+                      0.064,
+                      0.500,
+                      0.283,
+                      0.174,
+                      0.010,
+                      0.010,
+                      0.010
+                    ],
+                    waveformType:
+                        // widget.index?.isOdd ?? false
+                        WaveformType.fitWidth,
+                    // : WaveformType.long,
+                    playerWaveStyle: playerWaveStyle,
+                  ),
                   // if (widget.isSender) const SizedBox(width: 10),
                 ],
               ),
