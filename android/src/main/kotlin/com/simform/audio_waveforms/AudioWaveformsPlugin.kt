@@ -167,15 +167,6 @@ class AudioWaveformsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 }
             }
 
-            Constants.getRate -> {
-                val key = call.argument(Constants.playerKey) as String?
-                if (key != null) {
-                    audioPlayers[key]?.getRate(result)
-                } else {
-                    result.error(Constants.LOG_TAG, "Player key can't be null", "")
-                }
-            }
-
             Constants.getDuration -> {
                 val type =
                     if ((call.argument(Constants.durationType) as Int?) == 0) DurationType.Current else DurationType.Max
