@@ -129,7 +129,7 @@ class _AudioFileWaveformsState extends State<AudioFileWaveforms>
   late AnimationController _growingWaveController;
   late Animation<double> _growAnimation;
 
-  double _growAnimationProgress = 0.0;
+  double _growAnimationProgress = 1.0; // 设置为 1.0 以取消动画加载效果
   final ValueNotifier<int> _seekProgress = ValueNotifier(0);
   bool showSeekLine = false;
 
@@ -167,9 +167,10 @@ class _AudioFileWaveformsState extends State<AudioFileWaveforms>
       curve: widget.animationCurve,
     );
 
-    _growingWaveController
-      ..forward()
-      ..addListener(_updateGrowAnimationProgress);
+    // 取消动画加载效果：不启动动画控制器
+    // _growingWaveController
+    //   ..forward()
+    //   ..addListener(_updateGrowAnimationProgress);
     onCurrentDurationSubscription = playerController.onCurrentDurationChanged.listen((event) {
       _seekProgress.value = event;
       _updatePlayerPercent();

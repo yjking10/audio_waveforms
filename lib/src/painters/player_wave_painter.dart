@@ -61,10 +61,7 @@ class PlayerWavePainter extends CustomPainter {
       lineX = _drawFitWidthLine(size, canvas);
     }
     // 在拖拽时绘制渐变遮罩，确保遮罩覆盖在波形上
-    if (dragSeekLinePosition != null &&
-        lineX != null &&
-        lineX > 0 &&
-        callPushback) {
+    if (dragSeekLinePosition != null && lineX != null && lineX > 0 && callPushback) {
       print("callPushback  变化  $callPushback");
       _drawDragGradientMask(size, canvas, lineX);
     }
@@ -145,16 +142,12 @@ class PlayerWavePainter extends CustomPainter {
     for (int i = 0; i < length; i++) {
       final currentDragPointer = dragOffset.dx - totalBackDistance.dx;
       final waveWidth = i * playerWaveStyle.spacing;
-      final dx = waveWidth +
-          currentDragPointer +
-          emptySpace +
-          (waveformType.isFitWidth ? 0 : halfWidth);
+      final dx =
+          waveWidth + currentDragPointer + emptySpace + (waveformType.isFitWidth ? 0 : halfWidth);
       // 移除除以2的操作，让波形更明显
-      final waveHeight = (waveformData[i] * animValue) *
-          playerWaveStyle.scaleFactor *
-          scrollScale;
-      final bottomDy =
-          halfHeight + (playerWaveStyle.showBottom ? waveHeight : 0);
+      // 取消动画效果：直接使用 1.0 而不是 animValue
+      final waveHeight = (waveformData[i] * 1.0) * playerWaveStyle.scaleFactor * scrollScale;
+      final bottomDy = halfHeight + (playerWaveStyle.showBottom ? waveHeight : 0);
       final topDy = halfHeight + (playerWaveStyle.showTop ? -waveHeight : 0);
 
       // Only draw waves which are in visible viewport.
