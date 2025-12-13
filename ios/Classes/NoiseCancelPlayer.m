@@ -199,35 +199,35 @@
         return;
     }
 
-    // 记录开始播放的时间
-    if (self.currentState == NoiseCancelPlayerStatePaused) {
-        _startTime = CACurrentMediaTime() - _pausedTime;
-    } else {
-        _startTime = CACurrentMediaTime();
-    }
+    // currentTime 现在基于 currentFrame 计算，不需要维护 _startTime
+    // 但保留 _startTime 用于其他可能的用途
+    _startTime = CACurrentMediaTime();
+    
 
-    [self startProgressTimer];
     [self updateState:NoiseCancelPlayerStatePlaying];
+    [self startProgressTimer];
 }
 
 - (void)pause {
     if (self.currentState != NoiseCancelPlayerStatePlaying) return;
 
     [_engine pause];
-    _pausedTime = CACurrentMediaTime() - _startTime;
-    [self stopProgressTimer];
+    // currentFrame 已经保存了当前位置，currentTime 会基于它计算
+ 
     [self updateState:NoiseCancelPlayerStatePaused];
+    [self stopProgressTimer];
 }
 
 - (void)stop {
     [_engine stop];
-    [self stopProgressTimer];
-
     self.currentFrame = 0;
     _startTime = 0;
     _pausedTime = 0;
 
     [self updateState:NoiseCancelPlayerStateStopped];
+    [self stopProgressTimer];
+
+  
 }
 
 
@@ -236,15 +236,21 @@
 - (void)seekToTime:(NSTimeInterval)timeInSeconds {
     if (!_audioFile) return;
     NSLog(@"timeInSeconds---- %f    %f", timeInSeconds, self.duration);
-    // 限制时间范围
+    // 限制时间范围（timeInSeconds 是秒，duration 也是秒）
     timeInSeconds = MAX(0, MIN(timeInSeconds, self.duration));
 
     AVAudioFormat *format = _audioFile.processingFormat;
     double sampleRate = format.sampleRate;
     AVAudioFramePosition newFrame = (AVAudioFramePosition)(sampleRate * timeInSeconds);
+    
+    // 确保不超出文件范围
+    newFrame = MAX(0, MIN(newFrame, _audioFile.length));
 
-    // 设置新的帧位置
+    // 设置新的帧位置 - 无论什么状态都要设置
     self.currentFrame = newFrame;
+    
+    // 更新音频文件的 framePosition，确保下次读取时从正确位置开始
+    _audioFile.framePosition = newFrame;
 
     // 如果正在播放，需要重启音频引擎以确保跳转生效
     if (self.currentState == NoiseCancelPlayerStatePlaying) {
@@ -258,7 +264,8 @@
                     NSError *error = nil;
                     [self->_engine prepare];
                     if ([self->_engine startAndReturnError:&error]) {
-                        self->_startTime = CACurrentMediaTime() - timeInSeconds;
+                        // currentTime 现在基于 currentFrame 计算，不需要设置 _startTime
+                        self->_startTime = CACurrentMediaTime();
                         [self startProgressTimer];
                         [self updateState:NoiseCancelPlayerStatePlaying];
                     } else {
@@ -266,9 +273,9 @@
                         [self updateState:NoiseCancelPlayerStateStopped];
                     }
                 });
-    } else {
-        _pausedTime = timeInSeconds;
     }
+    // 在非播放状态下，currentFrame 已经保存了位置，currentTime 会基于它计算
+    // 下次播放时会从 currentFrame 指定的位置开始
 }
 
 #pragma mark - Progress Tracking
@@ -331,15 +338,19 @@
 
 - (NSTimeInterval)duration {
     if (!_audioFile) return 0.0;
-    return (NSTimeInterval) _audioFile.length / _audioFile.processingFormat.sampleRate;
+    return (NSTimeInterval) _audioFile.length / _audioFile.processingFormat.sampleRate ;
 }
 
 - (NSTimeInterval)currentTime {
-    if (self.currentState == NoiseCancelPlayerStatePlaying) {
-        return CACurrentMediaTime() - _startTime;
-    } else {
-        return _pausedTime;
+    if (!_audioFile) return 0.0;
+    
+    // 基于帧位置计算当前时间，这样更准确，特别是在变速播放时
+    AVAudioFormat *format = _audioFile.processingFormat;
+    double sampleRate = format.sampleRate;
+    if (sampleRate > 0) {
+        return (NSTimeInterval)self.currentFrame / sampleRate;
     }
+    return 0.0;
 }
 
 - (NoiseCancelPlayerState)state {
@@ -414,8 +425,8 @@
         NSError *error = nil;
         [_engine prepare];
         if ([_engine startAndReturnError:&error]) {
-            // 重新开始时间戳跟踪
-            _startTime = CACurrentMediaTime() - currentPlaybackTime;
+            // currentTime 现在基于 currentFrame 计算，不需要基于时间戳
+            _startTime = CACurrentMediaTime();
             [self startProgressTimer];
         } else {
             NSLog(@"Failed to restart engine after rate change: %@", error);

@@ -193,10 +193,11 @@ class PlayerController extends ChangeNotifier {
 
   /// Pauses currently playing audio.
   Future<void> pausePlayer() async {
+      _setPlayerState(PlayerState.paused);
     final isPaused =
         await AudioWaveformsInterface.instance.pausePlayer(playerKey);
-    if (isPaused) {
-      _setPlayerState(PlayerState.paused);
+    if (!isPaused) {
+      _setPlayerState(PlayerState.playing);
     }
     notifyListeners();
   }
@@ -205,8 +206,8 @@ class PlayerController extends ChangeNotifier {
   Future<void> stopPlayer() async {
     final isStopped =
         await AudioWaveformsInterface.instance.stopPlayer(playerKey);
-    if (isStopped) {
-      _setPlayerState(PlayerState.stopped);
+    if (!isStopped) {
+      _setPlayerState(PlayerState.playing);
     }
     notifyListeners();
   }
