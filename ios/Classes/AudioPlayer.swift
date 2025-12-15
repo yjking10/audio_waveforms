@@ -1,6 +1,5 @@
 import AVFoundation
 import Foundation
-import WebRTCAudioProcessing
 
 class AudioPlayer: NSObject, NoiseCancelPlayerDelegate {
 

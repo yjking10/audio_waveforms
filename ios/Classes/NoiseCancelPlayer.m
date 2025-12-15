@@ -435,11 +435,21 @@
 }
 
 
-- (void)setNoiseSuppressionLevel:(NoiseSuppressionLevel)newValue {
+- (void)setNoiseSuppressionLevel:(SuppressionLevel)newValue {
 
     if (newValue != _noiseSuppressionLevel) {
         _noiseSuppressionLevel = newValue;
-        [_apWrapper setNoiseSuppressionLevel:newValue];
+        if(newValue == SuppressionLevelVeryHigh) {
+            [_apWrapper setNoiseSuppressionLevel:NoiseSuppressionLevelVeryHigh];
+        } else if(newValue == SuppressionLevelHigh) {
+            [_apWrapper setNoiseSuppressionLevel:NoiseSuppressionLevelHigh];
+        }else if(newValue == SuppressionLevelModerate) {
+            [_apWrapper setNoiseSuppressionLevel:NoiseSuppressionLevelModerate];
+        } else {
+            [_apWrapper setNoiseSuppressionLevel:NoiseSuppressionLevelLow];
+
+        }
+
     }
 }
 

@@ -115,6 +115,15 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
                 } else {
                     result(FlutterError(code: Constants.audioWaveforms, message: "Can not set volume", details: "Player key is null"))
                 }
+//                   static const String setNoiseSuppressionLevel = "setNoiseSuppressionLevel";
+//                   static const String noiseSuppressionLevel = "noiseSuppressionLevel";
+            case Constants.setNoiseSuppressionLevel:
+                let key = args?[Constants.playerKey] as? String
+                if(key != nil){
+                    audioPlayers[key!]?.setNoiseSuppressionLevel(args?[Constants.noiseSuppressionLevel] as? Int,result)
+                } else {
+                    result(FlutterError(code: Constants.audioWaveforms, message: "Can not set noiseSuppressionLevel", details: "Player key is null"))
+                }
             case Constants.setRate:
                 let key = args?[Constants.playerKey] as? String
                 if(key != nil){

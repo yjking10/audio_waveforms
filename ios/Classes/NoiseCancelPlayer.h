@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
-#import <WebRTCAudioProcessing/AudioProcessingWrapper.h>
+#import "AudioProcessingWrapper.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -9,6 +9,14 @@ typedef NS_ENUM(NSInteger, NoiseCancelPlayerState) {
     NoiseCancelPlayerStatePlaying,
     NoiseCancelPlayerStatePaused,
     NoiseCancelPlayerStateStopped
+};
+
+
+typedef NS_ENUM(NSInteger, SuppressionLevel) {
+SuppressionLevelLow,
+SuppressionLevelModerate,
+SuppressionLevelHigh,
+SuppressionLevelVeryHigh
 };
 
 @protocol NoiseCancelPlayerDelegate <NSObject>
@@ -24,7 +32,7 @@ typedef NS_ENUM(NSInteger, NoiseCancelPlayerState) {
 @property (nonatomic, assign, readonly) NSTimeInterval duration; // 音频总时长
 @property (nonatomic, assign, readonly) NSTimeInterval currentTime; // 当前播放时间
 @property (nonatomic, assign, readonly) NoiseCancelPlayerState state; // 播放状态
-@property (nonatomic, assign) NoiseSuppressionLevel noiseSuppressionLevel;
+@property (nonatomic, assign) SuppressionLevel noiseSuppressionLevel;
 
 - (void)setFileURL:(NSURL *)audioFileURL;
 - (void)play;

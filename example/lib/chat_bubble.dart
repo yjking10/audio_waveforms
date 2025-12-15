@@ -113,15 +113,15 @@ class _WaveBubbleState extends State<WaveBubble> {
           noOfSamples: playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width - 24));
     }
 
-    if (widget.index == 5) {
-      file = File('${widget.appDirectory.path}/test.ogg');
-      await file
-          ?.writeAsBytes((await rootBundle.load('assets/audios/test.ogg')).buffer.asUint8List());
-      await controller.preparePlayer(
-          path: "",
-          shouldExtractWaveform: true,
-          noOfSamples: playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width - 24));
-    }
+    // if (widget.index == 5) {
+    //   file = File('${widget.appDirectory.path}/test.ogg');
+    //   await file
+    //       ?.writeAsBytes((await rootBundle.load('assets/audios/test.ogg')).buffer.asUint8List());
+    //   await controller.preparePlayer(
+    //       path: "",
+    //       shouldExtractWaveform: true,
+    //       noOfSamples: playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width - 24));
+    // }
 
     // Extracting waveform separately if index is odd.
     // if (widget.index?.isOdd ?? false) {

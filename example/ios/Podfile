@@ -33,7 +33,7 @@ target 'Runner' do
 
   flutter_install_all_ios_pods File.dirname(
   File.realpath(__FILE__))
-  pod 'WebRTCAudioProcessing', :path => '../../../WebRTCAudioProcessing', :modular_headers => true, :linkage => :static
+#   pod 'WebRTCAudioProcessing', :path => '../../../WebRTCAudioProcessing', :modular_headers => true, :linkage => :static
 
 end
 

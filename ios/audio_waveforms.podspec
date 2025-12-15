@@ -17,8 +17,12 @@ A new Flutter project.
   s.prefix_header_file = 'Classes/audio_waveforms-Prefix.pch'
 
   s.dependency 'Flutter'
-  s.dependency 'WebRTCAudioProcessing'
+  s.vendored_frameworks = 'Frameworks/webrtc_audio_processing.xcframework'
   s.platform = :ios, '8.0'  # Flutter.framework does not contain a i386 slice.
-  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
+  s.pod_target_xcconfig = {
+  'DEFINES_MODULE' => 'YES',
+  'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
+  'HEADER_SEARCH_PATHS' => '$(inherited) "${PODS_TARGET_SRCROOT}/Frameworks/webrtc_audio_processing.xcframework/ios-arm64/webrtc_audio_processing.framework/Headers" "${PODS_TARGET_SRCROOT}/Frameworks/webrtc_audio_processing.xcframework/ios-arm64/webrtc_audio_processing.framework/Headers/webrtc-audio-processing-1"',
+   }
   s.swift_version = '5.0'
 end
