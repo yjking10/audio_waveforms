@@ -95,6 +95,8 @@
 
 
 - (void)setFileURL:(NSURL *)audioFileURL {
+    [self resetEngineIfNeeded];
+
     NSError *error;
     _audioFile = [[AVAudioFile alloc] initForReading:audioFileURL error:&error];
     if (error) {
@@ -229,6 +231,26 @@
 
   
 }
+- (void)resetEngineIfNeeded {
+    if (_engine.isRunning) {
+        [_engine stop];
+    }
+
+    if (_sourceNode) {
+        [_engine disconnectNodeOutput:_sourceNode];
+        [_engine detachNode:_sourceNode];
+        _sourceNode = nil;
+    }
+
+    if (_timePitchNode) {
+        [_engine disconnectNodeOutput:_timePitchNode];
+        [_engine detachNode:_timePitchNode];
+        _timePitchNode = nil;
+    }
+
+    _currentFrame = 0;
+}
+
 
 
 #pragma mark - 拖拽播放
@@ -361,6 +383,7 @@
 - (void)setPlaybackRate:(float)rate {
     // 验证速率范围 (0.5 - 2.0 是 AVAudioUnitTimePitch 的有效范围)
     rate = MAX(0.5f, MIN(2.0f, rate));
+    NSLog(@"设置播放速率为: %f", rate);
 
     // 如果速率改变且不是1.0，暂时禁用降噪（因为APM可能不兼容变速）
     if (_rate != rate && rate != 1.0) {
