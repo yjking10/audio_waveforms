@@ -241,6 +241,7 @@ class AudioPlayer: NSObject, NoiseCancelPlayerDelegate {
             finishType = 0
 
         case .pause:
+           self.player?.seek(toTime: 0)
             self.player?.pause()
             stopListening()
             finishType = 1

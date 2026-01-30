@@ -193,7 +193,7 @@ class PlayerController extends ChangeNotifier {
 
   /// Pauses currently playing audio.
   Future<void> pausePlayer() async {
-      _setPlayerState(PlayerState.paused);
+    _setPlayerState(PlayerState.paused);
     final isPaused =
         await AudioWaveformsInterface.instance.pausePlayer(playerKey);
     if (!isPaused) {

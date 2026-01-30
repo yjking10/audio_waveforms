@@ -35,8 +35,9 @@ class _PlayerPageState extends State<PlayerPage> {
 
     controller = PlayerController();
     _preparePlayer();
-    playerStateSubscription = controller.onPlayerStateChanged.listen((_) {
-      setState(() {});
+    playerStateSubscription = controller.onPlayerStateChanged.listen((state) {
+      processingState = state;
+      print('state= $state');
     });
   }
 
@@ -48,8 +49,8 @@ class _PlayerPageState extends State<PlayerPage> {
     final appDirectory = await getApplicationDocumentsDirectory();
 
     // Opening file from assets folder
-    file = File('${appDirectory.path}/audio5.mp3');
-    await file?.writeAsBytes((await rootBundle.load('assets/audios/audio5.mp3'))
+    file = File('${appDirectory.path}/audio2.mp3');
+    await file?.writeAsBytes((await rootBundle.load('assets/audios/audio2.mp3'))
         .buffer
         .asUint8List());
     if (file?.path == null) {
@@ -73,6 +74,21 @@ class _PlayerPageState extends State<PlayerPage> {
           });
           print("${this.waveformData}");
     });
+  }
+
+  PlayerState _processingState = PlayerState.stopped;
+
+  PlayerState get processingState => _processingState;
+
+  set processingState(PlayerState value) {
+    if (_processingState != value) {
+
+      _processingState = value;
+
+setState(() {
+
+});
+    }
   }
 
   @override
@@ -112,13 +128,13 @@ class _PlayerPageState extends State<PlayerPage> {
                       playerWaveStyle: playerWaveStyle,
                     ),
                   ),
-                  if (!controller.playerState.isStopped)
+                  // if (!controller.playerState.isStopped)
                     IconButton(
                       onPressed: () async {
                         controller.playerState.isPlaying
                             ? await controller.pausePlayer()
                             : await controller.startPlayer();
-                        controller.setFinishMode(finishMode: FinishMode.loop);
+                        controller.setFinishMode(finishMode: FinishMode.pause);
                       },
                       icon: Icon(
                         controller.playerState.isPlaying

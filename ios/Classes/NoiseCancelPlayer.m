@@ -17,7 +17,6 @@
 @property(nonatomic, assign) AVAudioFramePosition currentFrame;
 @property(nonatomic, assign) AVAudioFramePosition currentPosition;
 
-//因为 WebRTC APM 要求 10ms 块，你可以在 processBuffer 中维护一个环形缓冲区，累积数据直到凑够 160 帧再调用 ProcessStream
 @property(nonatomic, strong) NSMutableData *accumulator;
 @property(nonatomic, assign) int accumulatedFrames;
 @property(nonatomic, assign) BOOL enableNoiseCancellation;
