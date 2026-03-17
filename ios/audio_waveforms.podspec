@@ -17,7 +17,7 @@ A new Flutter project.
   s.prefix_header_file = 'Classes/audio_waveforms-Prefix.pch'
 
   s.dependency 'Flutter'
-  s.vendored_frameworks = 'Frameworks/webrtc_audio_processing.xcframework'
+  s.vendored_frameworks = 'Frameworks/webrtc_audio_processing.xcframework'#https://resource.wavenote.cn/app/sdk/webrtc_audio_processing.xcframework.zip
   s.platform = :ios, '8.0'  # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = {
   'DEFINES_MODULE' => 'YES',

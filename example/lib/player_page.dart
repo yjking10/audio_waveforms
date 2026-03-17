@@ -49,8 +49,8 @@ class _PlayerPageState extends State<PlayerPage> {
     final appDirectory = await getApplicationDocumentsDirectory();
 
     // Opening file from assets folder
-    file = File('${appDirectory.path}/audio2.mp3');
-    await file?.writeAsBytes((await rootBundle.load('assets/audios/audio2.mp3'))
+    file = File('${appDirectory.path}/audio3.mp3');
+    await file?.writeAsBytes((await rootBundle.load('assets/audios/audio3.mp3'))
         .buffer
         .asUint8List());
     if (file?.path == null) {

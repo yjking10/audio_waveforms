@@ -1,5 +1,111 @@
 #import "NoiseCancelPlayer.h"
 
+@interface AudioRingBuffer : NSObject
+
+@property (nonatomic, readonly) int capacity;     // frame capacity
+@property (nonatomic, readonly) int channels;
+
+- (instancetype)initWithCapacity:(int)capacity channels:(int)channels;
+
+- (int)write:(float *)data frames:(int)frames;
+- (int)read:(float *)outData frames:(int)frames;
+- (int)availableFrames;
+
+@end
+
+
+@implementation AudioRingBuffer {
+    float *_buffer;
+    int _writeIndex;
+    int _readIndex;
+    int _size;
+}
+
+- (instancetype)initWithCapacity:(int)capacity channels:(int)channels {
+    if (self = [super init]) {
+        _capacity = capacity;
+        _channels = channels;
+        _buffer = (float *)malloc(sizeof(float) * capacity * channels);
+        _writeIndex = 0;
+        _readIndex = 0;
+        _size = 0;
+    }
+    return self;
+}
+
+- (int)write:(float *)data frames:(int)frames {
+    int writable = MIN(frames, _capacity - _size);
+    for (int i = 0; i < writable; i++) {
+        int idx = (_writeIndex + i) % _capacity;
+        memcpy(&_buffer[idx * _channels],
+               &data[i * _channels],
+               sizeof(float) * _channels);
+    }
+    _writeIndex = (_writeIndex + writable) % _capacity;
+    _size += writable;
+    return writable;
+}
+
+- (int)read:(float *)outData frames:(int)frames {
+    int readable = MIN(frames, _size);
+    for (int i = 0; i < readable; i++) {
+        int idx = (_readIndex + i) % _capacity;
+        memcpy(&outData[i * _channels],
+               &_buffer[idx * _channels],
+               sizeof(float) * _channels);
+    }
+    _readIndex = (_readIndex + readable) % _capacity;
+    _size -= readable;
+    return readable;
+}
+
+- (int)availableFrames {
+    return _size;
+}
+
+@end
+
+@interface FrameAligner : NSObject
+
+@property (nonatomic, assign) int frameSize; // 每帧多少 samples（自动算）
+@property (nonatomic, assign) int channels;
+
+- (instancetype)initWithSampleRate:(int)sampleRate channels:(int)channels;
+- (void)push:(float *)data frames:(int)frames;
+- (BOOL)hasFrame;
+- (void)popFrame:(float *)outFrame;
+
+@end
+
+
+@implementation FrameAligner {
+    AudioRingBuffer *_buffer;
+}
+
+- (instancetype)initWithSampleRate:(int)sampleRate channels:(int)channels {
+    if (self = [super init]) {
+        _channels = channels;
+        _frameSize = sampleRate / 100; // 10ms
+        _buffer = [[AudioRingBuffer alloc] initWithCapacity:sampleRate channels:channels];
+    }
+    return self;
+}
+
+- (void)push:(float *)data frames:(int)frames {
+    [_buffer write:data frames:frames];
+}
+
+- (BOOL)hasFrame {
+    return _buffer.availableFrames >= _frameSize;
+}
+
+- (void)popFrame:(float *)outFrame {
+    [_buffer read:outFrame frames:_frameSize];
+}
+
+@end
+
+
 @interface NoiseCancelPlayer ()
 @property(nonatomic, strong) AVAudioEngine *engine;
 @property(nonatomic, strong) AVAudioSourceNode *sourceNode;
@@ -26,6 +132,12 @@
 @implementation NoiseCancelPlayer {
 
     AudioProcessingWrapper *_apWrapper;
+    
+    FrameAligner *_aligner;
+    AudioRingBuffer *_outputBuffer;
+    int _sampleRate;
+    int _channels;
+    int _frameSize;
 }
 
 
@@ -104,77 +216,167 @@
     }
 
     AVAudioFormat *processingFormat = self.audioFile.processingFormat;
-    int sampleRate = (int) processingFormat.sampleRate;
-    int channels = (int) processingFormat.channelCount;
+    _sampleRate = (int) processingFormat.sampleRate;
+//    int channels = (int) processingFormat.channelCount;
+    
+    
+    _channels = (int)processingFormat.channelCount;
 
-    _targetFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:channels];
-    NSLog(@"通道数  %d", channels);
+    _aligner = [[FrameAligner alloc] initWithSampleRate:_sampleRate
+                                               channels:_channels];
+
+    _outputBuffer = [[AudioRingBuffer alloc] initWithCapacity:_sampleRate * 2
+                                                     channels:_channels];
+
+    _frameSize = _sampleRate / 100;
+
+    _targetFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:_sampleRate channels:_channels];
+    NSLog(@"通道数  %d", _channels);
     __weak typeof(self) weakSelf = self;
+    
+    _sourceNode = [[AVAudioSourceNode alloc]
+     initWithFormat:processingFormat
+     renderBlock:^OSStatus(BOOL *isSilence,
+                           const AudioTimeStamp *timestamp,
+                           AVAudioFrameCount frameCount,
+                           AudioBufferList *outputData) {
 
-    _sourceNode =
-            [[AVAudioSourceNode alloc] initWithFormat:processingFormat
-                                          renderBlock:^OSStatus(BOOL *isSilence,
-                                                                const AudioTimeStamp *timestamp,
-                                                                AVAudioFrameCount frameCount,
-                                                                AudioBufferList *outputData) {
-                                              __strong typeof(weakSelf) strongSelf = weakSelf;
-                                              if (!strongSelf) return noErr;
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return noErr;
 
-                                              AVAudioFramePosition framePos = strongSelf.currentFrame;
-                                              AVAudioFrameCount framesAvailable =
-                                                      (AVAudioFrameCount)(
-                                                              strongSelf.audioFile.length -
-                                                              framePos);
+        int channels = self->_channels;
 
-                                              AVAudioFrameCount framesToRead = MIN(frameCount,
-                                                                                   framesAvailable);
+        // ========= 1. 读取音频 =========
+        AVAudioPCMBuffer *tempBuffer =
+        [[AVAudioPCMBuffer alloc] initWithPCMFormat:processingFormat
+                                      frameCapacity:frameCount];
 
-                                              if (framesToRead > 0) {
-                                                  NSError *readError = nil;
-                                                  AVAudioPCMBuffer *tempBuffer =
-                                                          [[AVAudioPCMBuffer alloc] initWithPCMFormat:processingFormat
-                                                                                        frameCapacity:framesToRead];
+        self.audioFile.framePosition = self.currentFrame;
 
-                                                  // 设置读取起始位置
-                                                  strongSelf.audioFile.framePosition = framePos;
+        NSError *error = nil;
+        [self.audioFile readIntoBuffer:tempBuffer
+                           frameCount:frameCount
+                                error:&error];
 
-                                                  [strongSelf.audioFile readIntoBuffer:tempBuffer
-                                                                            frameCount:framesToRead
-                                                                                 error:&readError];
-                                                  if (readError) {
-                                                      NSLog(@"read error: %@", readError);
-                                                      return noErr;
-                                                  }
+        if (error) return noErr;
 
-                                                  /// apm降噪处理 - 只在正常播放速率时启用
-                                                  if (strongSelf.enableNoiseCancellation) {
-                                                      [strongSelf->_apWrapper processBuffer:tempBuffer];
-                                                  }
+        self.currentFrame += tempBuffer.frameLength;
 
-                                                  // 拷贝数据到 outputData
-                                                  for (UInt32 ch = 0;
-                                                       ch < outputData->mNumberBuffers; ch++) {
-                                                      float *outD = (float *) outputData->mBuffers[ch].mData;
-                                                      float *inD = tempBuffer.floatChannelData[ch];
-                                                      memcpy(outD, inD,
-                                                             framesToRead * sizeof(float));
-                                                  }
-                                              }
+        // ========= 2. 转 interleaved =========
+        int frames = (int)tempBuffer.frameLength;
+        float interleaved[frames * channels];
 
-                                              // 不够的地方填 0（防止播放垃圾数据）
-                                              if (framesToRead < frameCount) {
-                                                  for (UInt32 ch = 0;
-                                                       ch < outputData->mNumberBuffers; ch++) {
-                                                      float *out = (float *) outputData->mBuffers[ch].mData;
-                                                      memset(out + framesToRead, 0,
-                                                             (frameCount - framesToRead) *
-                                                             sizeof(float));
-                                                  }
-                                              }
+        for (int ch = 0; ch < channels; ch++) {
+            float *src = tempBuffer.floatChannelData[ch];
+            for (int i = 0; i < frames; i++) {
+                interleaved[i * channels + ch] = src[i];
+            }
+        }
 
-                                              strongSelf.currentFrame += framesToRead;
-                                              return noErr;
-                                          }];
+        // ========= 3. push 到 aligner =========
+        [self->_aligner push:interleaved frames:frames];
+
+        // ========= 4. 固定帧处理 =========
+        while ([self->_aligner hasFrame]) {
+
+            float frame[self->_frameSize * channels];
+            [self->_aligner popFrame:frame];
+
+            if (self.enableNoiseCancellation) {
+                [self->_apWrapper processFloatBuffer:frame sampleRate:self->_sampleRate  frameCount:self->_frameSize channels:channels];
+            }
+
+            [self->_outputBuffer write:frame frames:self->_frameSize];
+        }
+
+        // ========= 5. 输出 =========
+        int needed = (int)frameCount;
+        float out[needed * channels];
+
+        int got = [self->_outputBuffer read:out frames:needed];
+
+        // 不够补0
+        if (got < needed) {
+            memset(out + got * channels, 0,
+                   (needed - got) * channels * sizeof(float));
+        }
+
+        // ========= 6. 写回非 interleaved =========
+        for (int ch = 0; ch < channels; ch++) {
+            float *dst = (float *)outputData->mBuffers[ch].mData;
+            for (int i = 0; i < needed; i++) {
+                dst[i] = out[i * channels + ch];
+            }
+        }
+
+        return noErr;
+    }];
+
+//    _sourceNode =
+//            [[AVAudioSourceNode alloc] initWithFormat:processingFormat
+//                                          renderBlock:^OSStatus(BOOL *isSilence,
+//                                                                const AudioTimeStamp *timestamp,
+//                                                                AVAudioFrameCount frameCount,
+//                                                                AudioBufferList *outputData) {
+//                                              __strong typeof(weakSelf) strongSelf = weakSelf;
+//                                              if (!strongSelf) return noErr;
+//                
+//                NSLog(@"renderBlock frameCount=%d", frameCount);
+//                                              AVAudioFramePosition framePos = strongSelf.currentFrame;
+//                                              AVAudioFrameCount framesAvailable =
+//                                                      (AVAudioFrameCount)(
+//                                                              strongSelf.audioFile.length -
+//                                                              framePos);
+//
+//                                              AVAudioFrameCount framesToRead = MIN(frameCount,
+//                                                                                   framesAvailable);
+//
+//                                              if (framesToRead > 0) {
+//                                                  NSError *readError = nil;
+//                                                  AVAudioPCMBuffer *tempBuffer =
+//                                                          [[AVAudioPCMBuffer alloc] initWithPCMFormat:processingFormat
+//                                                                                        frameCapacity:framesToRead];
+//
+//                                                  // 设置读取起始位置
+//                                                  strongSelf.audioFile.framePosition = framePos;
+//
+//                                                  [strongSelf.audioFile readIntoBuffer:tempBuffer
+//                                                                            frameCount:framesToRead
+//                                                                                 error:&readError];
+//                                                  if (readError) {
+//                                                      NSLog(@"read error: %@", readError);
+//                                                      return noErr;
+//                                                  }
+//
+//                                                  /// apm降噪处理 - 只在正常播放速率时启用
+//                                                  if (strongSelf.enableNoiseCancellation) {
+//                                                      [strongSelf->_apWrapper processBuffer:tempBuffer];
+//                                                  }
+//
+//                                                  // 拷贝数据到 outputData
+//                                                  for (UInt32 ch = 0;
+//                                                       ch < outputData->mNumberBuffers; ch++) {
+//                                                      float *outD = (float *) outputData->mBuffers[ch].mData;
+//                                                      float *inD = tempBuffer.floatChannelData[ch];
+//                                                      memcpy(outD, inD,
+//                                                             framesToRead * sizeof(float));
+//                                                  }
+//                                              }
+//
+//                                              // 不够的地方填 0（防止播放垃圾数据）
+//                                              if (framesToRead < frameCount) {
+//                                                  for (UInt32 ch = 0;
+//                                                       ch < outputData->mNumberBuffers; ch++) {
+//                                                      float *out = (float *) outputData->mBuffers[ch].mData;
+//                                                      memset(out + framesToRead, 0,
+//                                                             (frameCount - framesToRead) *
+//                                                             sizeof(float));
+//                                                  }
+//                                              }
+//
+//                                              strongSelf.currentFrame += framesToRead;
+//                                              return noErr;
+//                                          }];
 
     [_engine attachNode:_sourceNode];
 
