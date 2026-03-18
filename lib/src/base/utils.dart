@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'player_identifier.dart';
 
 //ignore_for_file: constant_identifier_names
@@ -13,20 +15,7 @@ extension IntExtension on int {
 }
 
 /// State of recorder
-enum RecorderState {
-  initialized,
-  recording,
-  paused,
-  stopped;
-
-  bool get isRecording => this == RecorderState.recording;
-
-  bool get isInitialized => this == RecorderState.initialized;
-
-  bool get isPaused => this == RecorderState.paused;
-
-  bool get isStopped => this == RecorderState.stopped;
-}
+enum RecorderState { initialized, recording, paused, stopped }
 
 /// Android encoders.
 ///
@@ -36,17 +25,25 @@ enum RecorderState {
 /// Check [MediaRecorder.AudioEncoder](https://developer.android.com/reference/android/media/MediaRecorder.AudioEncoder)
 /// for more info.
 enum AndroidEncoder {
-  wav('WAV'),
-  aacLc('AAC_LC'),
-  aacHe('AAC_HE'),
-  aacEld('AAC_ELD'),
-  amrNb('AMR_NB'),
-  amrWb('AMR_WB'),
-  opus('OPUS');
+  wav,
+  aacLc,
+  aacHe,
+  aacEld,
+  amrNb,
+  amrWb,
+  opus;
 
-  const AndroidEncoder(this.nativeFormat);
-
-  final String nativeFormat;
+  String toNativeFormat() {
+    return switch (this) {
+      AndroidEncoder.wav => 'WAV',
+      AndroidEncoder.aacLc => 'AAC_LC',
+      AndroidEncoder.aacHe => 'AAC_HE',
+      AndroidEncoder.aacEld => 'AAC_ELD',
+      AndroidEncoder.amrNb => 'AMR_NB',
+      AndroidEncoder.amrWb => 'AMR_WB',
+      AndroidEncoder.opus => 'OPUS',
+    };
+  }
 }
 
 /// IOS encoders.
@@ -84,15 +81,7 @@ enum PlayerState {
   paused,
 
   /// when player is stopped. Default state of any player ([uninitialised]).
-  stopped;
-
-  bool get isPlaying => this == PlayerState.playing;
-
-  bool get isStopped => this == PlayerState.stopped;
-
-  bool get isInitialised => this == PlayerState.initialized;
-
-  bool get isPaused => this == PlayerState.paused;
+  stopped
 }
 
 /// There are two type duration which we can get while playing an audio.
@@ -144,13 +133,35 @@ enum WaveformType {
   /// pushed back and a middle line shows current progress.
   ///
   /// This waveform only allows seek with drag.
-  long;
+  long
+}
 
+extension WaveformTypeExtension on WaveformType {
   /// Check WaveformType is equals to fitWidth or not.
   bool get isFitWidth => this == WaveformType.fitWidth;
 
   /// Check WaveformType is equals to long or not.
   bool get isLong => this == WaveformType.long;
+}
+
+extension PlayerStateExtension on PlayerState {
+  bool get isPlaying => this == PlayerState.playing;
+
+  bool get isStopped => this == PlayerState.stopped;
+
+  bool get isInitialised => this == PlayerState.initialized;
+
+  bool get isPaused => this == PlayerState.paused;
+}
+
+extension RecorderStateExtension on RecorderState {
+  bool get isRecording => this == RecorderState.recording;
+
+  bool get isInitialized => this == RecorderState.initialized;
+
+  bool get isPaused => this == RecorderState.paused;
+
+  bool get isStopped => this == RecorderState.stopped;
 }
 
 /// Rate of updating the reported current duration.
@@ -169,156 +180,27 @@ enum UpdateFrequency {
   final int value;
 }
 
-/// Resizes waveform data to a fixed target size.
-///
-/// If the input data is smaller than target size, interpolates using average values.
-/// If the input data is larger than target size, downsamples by removing middle values.
-///
-/// [data] - Original waveform data
-/// [targetSize] - Target number of samples
-///
-/// Returns resized waveform data with exactly [targetSize] elements.
-List<double> resizeWaveformData(List<double> data, int targetSize) {
-  if (data.isEmpty) {
-    return List.filled(targetSize, 0.0);
-  }
+/// An enum to decide waveform rendering mode.
+enum WaveformRenderMode {
+  /// Normal mode where waveform starts from left to right.
+  ///
+  /// The waveform will render from left to right. Once rendered waveforms
+  /// reaches the end of the available width, it will start pushing the
+  /// previous waves to left to make space for new waves.
+  ltr,
 
-  if (targetSize <= 0) {
-    return [];
-  }
+  /// RTL mode where waveform starts from right to left.
+  ///
+  /// The waveform will render from right to left. Older waves will be pushed
+  /// to the left to make space for new waves.
+  rtl;
 
-  final int sourceSize = data.length;
+  /// Check WaveformRenderMode is equals to ltr or not.
+  bool get isLtr => this == WaveformRenderMode.ltr;
 
-  // If sizes match, return original data
-  if (sourceSize == targetSize) {
-    return List.from(data);
-  }
-
-  // If source is smaller, interpolate
-  if (sourceSize < targetSize) {
-    print("sourceSize   little   $sourceSize");
-    return _interpolateWaveformData(data, targetSize);
-  }
-  print("sourceSize     $sourceSize");
-  // If source is larger, downsample
-  return _downsampleWaveformData(data, targetSize);
+  /// Check WaveformRenderMode is equals to rtl or not.
+  bool get isRtl => this == WaveformRenderMode.rtl;
 }
 
-/// Interpolates waveform data by inserting average values between existing points.
-List<double> _interpolateWaveformData(List<double> data, int targetSize) {
-  final result = <double>[];
-  final int sourceSize = data.length;
-  final double ratio = (sourceSize - 1) / (targetSize - 1);
-
-  for (int i = 0; i < targetSize; i++) {
-    final double sourceIndex = i * ratio;
-    final int lowerIndex = sourceIndex.floor();
-    final int upperIndex = (lowerIndex + 1).clamp(0, sourceSize - 1);
-    final double fraction = sourceIndex - lowerIndex;
-
-    if (lowerIndex == upperIndex || fraction == 0) {
-      result.add(data[lowerIndex]);
-    } else {
-      // Linear interpolation
-      final double interpolated =
-          data[lowerIndex] * (1 - fraction) + data[upperIndex] * fraction;
-      result.add(interpolated);
-    }
-  }
-
-  return result;
-}
-
-/// Downsamples waveform data using RMS (Root Mean Square) and maximum value combination.
-/// This method enhances waveform visibility by preserving both energy and peaks.
-List<double> _downsampleWaveformData(List<double> data, int targetSize) {
-  if (targetSize <= 0) {
-    return [];
-  }
-
-  if (targetSize == 1) {
-    // Use RMS value for better energy representation
-    final double sumSquares =
-        data.fold(0.0, (sum, value) => sum + value * value);
-    final double meanSquare = sumSquares / data.length;
-    final double rms = meanSquare > 0 ? meanSquare : 0.0;
-    return [rms];
-  }
-
-  final result = <double>[];
-  final int sourceSize = data.length;
-
-  if (targetSize == 2) {
-    // Use enhanced method for first half and second half
-    final int mid = sourceSize ~/ 2;
-    final double max1 = data.sublist(0, mid).reduce((a, b) => a > b ? a : b);
-    final double sumSquares1 =
-        data.sublist(0, mid).fold(0.0, (sum, value) => sum + value * value);
-    final double meanSquare1 = sumSquares1 / mid;
-    final double rms1 = meanSquare1 > 0 ? meanSquare1 : 0.0;
-    final double combined1 = rms1 * 0.5 + max1 * 0.5;
-
-    final double max2 = data.sublist(mid).reduce((a, b) => a > b ? a : b);
-    final double sumSquares2 =
-        data.sublist(mid).fold(0.0, (sum, value) => sum + value * value);
-    final double meanSquare2 = sumSquares2 / (sourceSize - mid);
-    final double rms2 = meanSquare2 > 0 ? meanSquare2 : 0.0;
-    final double combined2 = rms2 * 0.5 + max2 * 0.5;
-
-    result.add(combined1);
-    result.add(combined2);
-    return result;
-  }
-
-  // Calculate window size for each target sample
-  final double windowSize = sourceSize / targetSize;
-
-  // Sample by combining RMS and maximum value in each window
-  for (int i = 0; i < targetSize; i++) {
-    final int startIndex = (i * windowSize).floor();
-    final int endIndex = ((i + 1) * windowSize).floor().clamp(0, sourceSize);
-
-    if (startIndex >= sourceSize) {
-      break;
-    }
-
-    final int windowLength = endIndex - startIndex;
-    if (windowLength == 0) {
-      result.add(0.0);
-      continue;
-    }
-
-    // Calculate RMS (Root Mean Square) for energy representation
-    double sumSquares = 0.0;
-    double maxValue = data[startIndex];
-
-    for (int j = startIndex; j < endIndex; j++) {
-      final double value = data[j];
-      sumSquares += value * value;
-      if (value > maxValue) {
-        maxValue = value;
-      }
-    }
-
-    final double meanSquare = sumSquares / windowLength;
-    final double rms = meanSquare > 0 ? meanSquare : 0.0;
-
-    // Use more aggressive enhancement: prioritize maximum value heavily
-    // Combine RMS and maximum: use weighted average (30% RMS + 70% max)
-    // This better highlights peaks and makes waveform more visible
-    double combined = rms * 0.3 + maxValue * 0.7;
-
-    // Additional aggressive enhancement: apply power curve to boost values
-    // This makes the waveform significantly more visible
-    if (combined > 0) {
-      // Use square root to enhance smaller values, making them more visible
-      final double sqrtEnhanced = combined * 0.5 + (combined * combined) * 0.5;
-      // Further boost by applying a power curve
-      combined = sqrtEnhanced * 0.6 + (sqrtEnhanced * sqrtEnhanced) * 0.4;
-    }
-
-    result.add(combined);
-  }
-
-  return result;
-}
+/// Checks if the current platform is iOS or macOS.
+bool get isIosOrMacOS => Platform.isIOS || Platform.isMacOS;

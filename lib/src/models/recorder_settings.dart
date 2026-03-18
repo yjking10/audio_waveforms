@@ -34,7 +34,6 @@ class RecorderSettings {
   /// Converts the RecorderSettings instance to a JSON map for iOS.
   Map<String, dynamic> iosToJson({
     String? path,
-    bool useLegacyNormalization = false,
     bool overrideAudioSession = true,
   }) =>
       {
@@ -42,7 +41,6 @@ class RecorderSettings {
         Constants.encoder: iosEncoderSettings.iosEncoder.index,
         Constants.sampleRate: sampleRate,
         Constants.bitRate: bitRate,
-        Constants.useLegacyNormalization: useLegacyNormalization,
         Constants.overrideAudioSession: overrideAudioSession,
         Constants.linearPCMBitDepth: iosEncoderSettings.linearPCMBitDepth,
         Constants.linearPCMIsBigEndian: iosEncoderSettings.linearPCMIsBigEndian,
@@ -52,7 +50,8 @@ class RecorderSettings {
   /// Converts the RecorderSettings instance to a JSON map for Android.
   Map<String, dynamic> androidToJson({String? path}) => {
         Constants.path: path,
-        Constants.encoder: androidEncoderSettings.androidEncoder.nativeFormat,
+        Constants.encoder:
+            androidEncoderSettings.androidEncoder.toNativeFormat(),
         Constants.sampleRate: sampleRate,
         Constants.bitRate: bitRate,
       };

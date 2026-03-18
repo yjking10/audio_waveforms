@@ -1,4 +1,27 @@
-## 2.0.0 (Unreleased)
+## 2.1.0 (#unreleased)
+
+- Feature [#468](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/pull/468) - Add macOS support
+
+## 2.0.2
+
+- Chore [#460](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/pull/460) - Update compileSdk and targetSdk to run example app
+- Chore [#461](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/pull/461) - Update analysis options and related files
+- Fixed [#464](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/pull/464) - Fixed labels not displaying properly during recording
+- Feature [#398](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/398) - Add noOfSamplesPerSecond parameter to preparePlayer for easier waveform configuration
+- Fixed [#441](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/441) - Incorrect waveform UI when setting `Duration.zero` for AudioFileWaveforms
+- Fixed [#439](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/439) - Waveform extraction is not cancel when PlayController is disposed
+- Fixed [#236](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/236) - Recorded duration is not same as controller duration
+- Feature [#250](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/250) - Add support for right to left waveform rendering
+- Fixed [#463](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/463) - iOS crash while streaming audio bytes due to hardware format mismatch 
+
+## 2.0.1
+
+- Fixed [#452](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/452) - OnAmplitude continues to add data points when recording is paused on iOS
+- Fixed [#453](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/453) - Recording with wav format never returns result
+- Fixed [#433](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/433) - `extractWaveformData` doesn't return result on iOS
+- Fixed [#455](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/pull/455) - On android resuming audio recording returns false instead of true - thanks [@yuanhoujun](https://github.com/yuanhoujun)
+
+## 2.0.0
 
 - Fixed [#350](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/350) - Left most visible wave is clipped in half when recording.
 - Fixed [#397](https://github.com/SimformSolutionsPvtLtd/audio_waveforms/issues/397) - iOS crashes at `extractWaveform` instead provide error log

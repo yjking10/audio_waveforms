@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +12,13 @@ part '../base/audio_waveforms_interface.dart';
 part 'waveform_extraction_controller.dart';
 
 class PlayerController extends ChangeNotifier {
+  PlayerController() {
+    if (!PlatformStreams.instance.isInitialised) {
+      PlatformStreams.instance.init();
+    }
+    PlatformStreams.instance.playerControllerFactory.addAll({playerKey: this});
+  }
+
   PlayerState _playerState = PlayerState.stopped;
 
   /// Provides current state of the player
@@ -88,13 +94,6 @@ class PlayerController extends ChangeNotifier {
   Stream<void> get onCompletion =>
       PlatformStreams.instance.onCompletion.filter(playerKey);
 
-  PlayerController() {
-    if (!PlatformStreams.instance.isInitialised) {
-      PlatformStreams.instance.init();
-    }
-    PlatformStreams.instance.playerControllerFactory.addAll({playerKey: this});
-  }
-
   void _setPlayerState(PlayerState state) {
     _playerState = state;
     PlatformStreams.instance
@@ -123,13 +122,31 @@ class PlayerController extends ChangeNotifier {
   /// [noOfSamples] indicates no of extracted data points. This will determine
   /// number of bars in the waveform.
   ///
-  /// Defaults to 100.
+  /// Defaults to 100 if both [noOfSamples] and [noOfSamplesPerSecond] are null.
+  ///
+  /// [noOfSamplesPerSecond] can be used as an alternative to [noOfSamples] to specify
+  /// the number of samples per second of audio. The actual [noOfSamples] will
+  /// be calculated as: noOfSamplesPerSecond * durationInSeconds.
+  /// This is useful when the full duration is not known in advance.
+  ///
+  /// **Important**: Provide only ONE of [noOfSamples] OR [noOfSamplesPerSecond], not both.
+  /// - To use fixed sample count: provide only [noOfSamples]
+  /// - To use samples per second: provide only [noOfSamplesPerSecond]
+  /// - If both are null, defaults to [noOfSamples] = 100
   Future<void> preparePlayer({
     required String path,
     double? volume,
     bool shouldExtractWaveform = true,
-    int noOfSamples = 100,
+    int? noOfSamples,
+    int? noOfSamplesPerSecond,
   }) async {
+    // Validate that user doesn't provide both parameters
+    assert(
+      !(noOfSamples != null && noOfSamplesPerSecond != null),
+      'Cannot provide both noOfSamples and noOfSamplesPerSecond. '
+      'Use noOfSamples for fixed count OR noOfSamplesPerSecond for dynamic calculation based on duration.',
+    );
+
     if (!path.startsWith('http')) {
       // Keep the full URL for remote files and strip for local files
       final uri = Uri.tryParse(path);
@@ -151,17 +168,32 @@ class PlayerController extends ChangeNotifier {
     }
 
     if (shouldExtractWaveform) {
+      // Determine which sampling strategy to use
+      final int actualNoOfSamples;
+      if (noOfSamplesPerSecond != null) {
+        // Use dynamic calculation based on duration
+        if (_maxDuration > 0) {
+          actualNoOfSamples =
+              (noOfSamplesPerSecond * (_maxDuration / 1000)).round();
+        } else {
+          actualNoOfSamples =
+              noOfSamplesPerSecond; // Fallback if duration unavailable
+        }
+      } else {
+        // Use fixed sample count (default to 100 if not provided)
+        actualNoOfSamples = noOfSamples ?? 100;
+      }
+
       waveformExtraction
           .extractWaveformData(
         path: path,
-        noOfSamples: noOfSamples,
+        noOfSamples: actualNoOfSamples,
       )
           .then(
         (value) {
           waveformExtraction.waveformData
             ..clear()
             ..addAll(value);
-          print("controller 数据长度 ${value.length}");
           notifyListeners();
         },
       );
@@ -193,11 +225,10 @@ class PlayerController extends ChangeNotifier {
 
   /// Pauses currently playing audio.
   Future<void> pausePlayer() async {
-    _setPlayerState(PlayerState.paused);
     final isPaused =
         await AudioWaveformsInterface.instance.pausePlayer(playerKey);
-    if (!isPaused) {
-      _setPlayerState(PlayerState.playing);
+    if (isPaused) {
+      _setPlayerState(PlayerState.paused);
     }
     notifyListeners();
   }
@@ -206,8 +237,8 @@ class PlayerController extends ChangeNotifier {
   Future<void> stopPlayer() async {
     final isStopped =
         await AudioWaveformsInterface.instance.stopPlayer(playerKey);
-    if (!isStopped) {
-      _setPlayerState(PlayerState.playing);
+    if (isStopped) {
+      _setPlayerState(PlayerState.stopped);
     }
     notifyListeners();
   }
@@ -300,6 +331,7 @@ class PlayerController extends ChangeNotifier {
   void dispose() async {
     if (playerState != PlayerState.stopped) await stopPlayer();
     await release();
+    await waveformExtraction.stopWaveformExtraction();
     PlatformStreams.instance.playerControllerFactory.remove(playerKey);
     if (PlatformStreams.instance.playerControllerFactory.isEmpty) {
       PlatformStreams.instance.dispose();

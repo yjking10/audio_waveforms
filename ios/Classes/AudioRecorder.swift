@@ -1,7 +1,6 @@
 import AVFoundation
 import Accelerate
 
-
 public class AudioRecorder: NSObject, AVAudioRecorderDelegate{
     var audioRecorder: AVAudioRecorder?
     var path: String?
@@ -10,7 +9,6 @@ public class AudioRecorder: NSObject, AVAudioRecorderDelegate{
     var recordedDuration: CMTime = CMTime.zero
     var flutterChannel: FlutterMethodChannel
     var bytesStreamEngine: RecorderBytesStreamEngine
-    var recordingSettings: RecordingSettings?  // 关键添加
     init(channel: FlutterMethodChannel){
         flutterChannel = channel
         bytesStreamEngine = RecorderBytesStreamEngine(channel: channel)
@@ -18,7 +16,7 @@ public class AudioRecorder: NSObject, AVAudioRecorderDelegate{
 
     func startRecording(_ result: @escaping FlutterResult,_ recordingSettings: RecordingSettings){
         useLegacyNormalization = recordingSettings.useLegacy ?? false
-        self.recordingSettings = recordingSettings  // 新增这行
+
         var settings: [String: Any] = [
                 AVFormatIDKey: getEncoder(recordingSettings.encoder ?? 0),
                 AVSampleRateKey: recordingSettings.sampleRate ?? 44100,
@@ -65,7 +63,11 @@ public class AudioRecorder: NSObject, AVAudioRecorderDelegate{
             audioRecorder?.delegate = self
             audioRecorder?.isMeteringEnabled = true
             audioRecorder?.record()
-            bytesStreamEngine.attach(result: result)
+            bytesStreamEngine
+                .attach(
+                    result: result,
+                    sampleRate:  recordingSettings.sampleRate ?? Constants.defaultSampleRate
+                )
             result(true)
         } catch {
             result(FlutterError(code: Constants.audioWaveforms, message: "Failed to start recording", details: error.localizedDescription))
@@ -95,9 +97,6 @@ public class AudioRecorder: NSObject, AVAudioRecorderDelegate{
         } else {
             sendResult(result, duration: Int(CMTime.zero.seconds))
         }
-        if self.recordingSettings?.overrideAudioSession ?? false {
-            try? AVAudioSession.sharedInstance().setActive(false)
-        }
         audioRecorder = nil
     }
     
@@ -110,11 +109,13 @@ public class AudioRecorder: NSObject, AVAudioRecorderDelegate{
     
     public func pauseRecording(_ result: @escaping FlutterResult) {
         audioRecorder?.pause()
+        bytesStreamEngine.togglePause()
         result(false)
     }
     
     public func resumeRecording(_ result: @escaping FlutterResult) {
         audioRecorder?.record()
+        bytesStreamEngine.togglePause();
         result(true)
     }
     

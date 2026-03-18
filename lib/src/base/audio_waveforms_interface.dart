@@ -16,7 +16,7 @@ class AudioWaveformsInterface {
   }) async {
     final isRecording = await _methodChannel.invokeMethod(
       Constants.startRecording,
-      Platform.isIOS
+      (isIosOrMacOS)
           ? recorderSetting.iosToJson(
               path: path,
               overrideAudioSession: overrideAudioSession,
@@ -253,11 +253,15 @@ class AudioWaveformsInterface {
         case Constants.onAudioChunk:
           final normalisedRms = call.arguments[Constants.normalisedRms];
           final bytes = call.arguments[Constants.bytes];
+          final recordedDuration = call.arguments[Constants.recordedDuration];
           if (normalisedRms is double) {
             instance.addAmplitudeEvent(normalisedRms);
           }
           if (bytes is Uint8List) {
             instance.addRecordedBytes(bytes);
+          }
+          if (recordedDuration is int) {
+            instance.addRecordedDurationEvent(recordedDuration);
           }
           break;
       }

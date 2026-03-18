@@ -51,7 +51,7 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
             case Constants.preparePlayer:
                 let key = args?[Constants.playerKey] as? String
                 if(key != nil){
-                    initPlayer(playerKey: key!, result: result)
+                    initPlayer(playerKey: key!)
                     audioPlayers[key!]?.preparePlayer(path: args?[Constants.path] as? String,
                                                       volume: args?[Constants.volume] as? Double,
                                                       updateFrequency: args?[Constants.updateFrequency] as? Int,
@@ -192,9 +192,9 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
     }
     
     
-    func initPlayer(playerKey: String, result: @escaping FlutterResult) {
+    func initPlayer(playerKey: String) {
         if audioPlayers[playerKey] == nil {
-            let newPlayer = AudioPlayer(plugin: self,playerKey: playerKey,channel: flutterChannel, result: result)
+            let newPlayer = AudioPlayer(plugin: self,playerKey: playerKey,channel: flutterChannel)
             audioPlayers[playerKey] = newPlayer
         }
     }
