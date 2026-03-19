@@ -329,9 +329,27 @@ class PlayerController extends ChangeNotifier {
   /// new controller.
   @override
   void dispose() async {
-    if (playerState != PlayerState.stopped) await stopPlayer();
+    // 1. 先停止播放，这是最占用硬件资源的操作
+    if (playerState != PlayerState.stopped) {
+      try {
+        await stopPlayer();
+      } catch (e) {
+        print('stopPlayer error: $e');
+      }
+    }
+
+    // 2. 给 Native 留一点缓冲时间 (关键！)
+    // 避免播放器刚关，提取器就去碰已经失效的 Codec
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    try {
+      // 3. 停止波形提取任务
+      // 加上 try-catch 防止它抛出 IllegalStateException 导致 App 强退
+      await waveformExtraction.stopWaveformExtraction();
+    } catch (e) {
+      print('waveformExtraction stop error (Expected on Android): $e');
+    }
     await release();
-    await waveformExtraction.stopWaveformExtraction();
     PlatformStreams.instance.playerControllerFactory.remove(playerKey);
     if (PlatformStreams.instance.playerControllerFactory.isEmpty) {
       PlatformStreams.instance.dispose();

@@ -18,7 +18,6 @@ class AudioPlayer: NSObject, NoiseCancelPlayerDelegate {
         plugin: SwiftAudioWaveformsPlugin,
         playerKey: String,
         channel: FlutterMethodChannel,
-        result: @escaping FlutterResult
     ) {
 
         self.plugin = plugin

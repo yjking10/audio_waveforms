@@ -59,9 +59,11 @@ class _PlayerPageState extends State<PlayerPage> {
     // Prepare player with extracting waveform if index is even.
     controller.preparePlayer(
       path: file!.path,
-      shouldExtractWaveform: true,
+      shouldExtractWaveform: false,
       noOfSamples: 100
     );
+
+    print('controller-playerKey ${controller.playerKey}');
     // Extracting waveform separately if index is odd.
     controller.waveformExtraction
         .extractWaveformData(
