@@ -1,3 +1,4 @@
+
 #import "NoiseCancelPlayer.h"
 
 @interface AudioRingBuffer : NSObject
@@ -207,6 +208,8 @@
 
 - (void)setFileURL:(NSURL *)audioFileURL {
     [self resetEngineIfNeeded];
+    
+    NSLog(@"audioFileURL %@", audioFileURL.absoluteString);
 
     NSError *error;
     _audioFile = [[AVAudioFile alloc] initForReading:audioFileURL error:&error];
@@ -320,7 +323,7 @@
 //                                                                AudioBufferList *outputData) {
 //                                              __strong typeof(weakSelf) strongSelf = weakSelf;
 //                                              if (!strongSelf) return noErr;
-//                
+//
 //                NSLog(@"renderBlock frameCount=%d", frameCount);
 //                                              AVAudioFramePosition framePos = strongSelf.currentFrame;
 //                                              AVAudioFrameCount framesAvailable =
@@ -679,3 +682,4 @@
 
 
 @end
+
