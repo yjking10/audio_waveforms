@@ -219,7 +219,7 @@ class AudioPlayer: NSObject, NoiseCancelPlayerDelegate {
     func sendCurrentDuration() {
         let ms = (player?.currentTime ?? 0) * 1000
 
-        print("sendCurrentDuration  \(ms)")
+//         print("sendCurrentDuration  \(ms)")
         flutterChannel.invokeMethod(
             Constants.onCurrentDuration,
             arguments: [
