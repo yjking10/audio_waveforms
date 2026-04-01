@@ -267,11 +267,11 @@ class AudioPlayer: NSObject, NoiseCancelPlayerDelegate {
         didUpdateProgress currentTime: TimeInterval,
         duration: TimeInterval
     ) {
-        print("didUpdateProgress \(currentTime)  \(duration)")
+        // print("didUpdateProgress \(currentTime)  \(duration)")
         sendCurrentDuration()
     }
     func audioPlayer(_ player: Any, didChange state: NoiseCancelPlayerState) {
-        print("didChange \(NoiseCancelPlayerState.RawValue())")
+        // print("didChange \(NoiseCancelPlayerState.RawValue())")
 
     }
 }
