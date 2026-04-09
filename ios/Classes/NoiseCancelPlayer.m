@@ -1,5 +1,6 @@
 
 #import "NoiseCancelPlayer.h"
+#include <stdatomic.h>
 
 @interface AudioRingBuffer : NSObject
 
@@ -133,12 +134,16 @@
 @implementation NoiseCancelPlayer {
 
     AudioProcessingWrapper *_apWrapper;
-    
+
     FrameAligner *_aligner;
     AudioRingBuffer *_outputBuffer;
     int _sampleRate;
     int _channels;
     int _frameSize;
+
+    // Seek 同步：主线程写，渲染线程读，避免 AVAudioFile 并发访问
+    atomic_llong _seekPendingFrame;  // -1 表示无待处理的 seek
+    _Atomic(BOOL) _seekPending;
 }
 
 
@@ -192,6 +197,8 @@
         _currentState = NoiseCancelPlayerStateStopped;
         _startTime = 0;
         _pausedTime = 0;
+        atomic_store(&_seekPendingFrame, -1LL);
+        atomic_store(&_seekPending, NO);
 
         // 激活会话
         [audioSession setActive:YES error:&sessionError];
@@ -249,12 +256,25 @@
 
         int channels = self->_channels;
 
+        // ========= 0. 处理待处理的 seek（仅在渲染线程操作 AVAudioFile）=========
+        if (atomic_load(&self->_seekPending)) {
+            long long targetFrame = atomic_load(&self->_seekPendingFrame);
+            if (targetFrame >= 0) {
+                self.audioFile.framePosition = (AVAudioFramePosition)targetFrame;
+                self.currentFrame = (AVAudioFramePosition)targetFrame;
+                // 清空 ring buffer 和 aligner，避免播放旧数据
+                self->_outputBuffer = [[AudioRingBuffer alloc] initWithCapacity:self->_sampleRate * 2
+                                                                       channels:channels];
+                self->_aligner = [[FrameAligner alloc] initWithSampleRate:self->_sampleRate
+                                                                 channels:channels];
+            }
+            atomic_store(&self->_seekPending, NO);
+        }
+
         // ========= 1. 读取音频 =========
         AVAudioPCMBuffer *tempBuffer =
         [[AVAudioPCMBuffer alloc] initWithPCMFormat:processingFormat
                                       frameCapacity:frameCount];
-
-        self.audioFile.framePosition = self.currentFrame;
 
         NSError *error = nil;
         [self.audioFile readIntoBuffer:tempBuffer
@@ -462,46 +482,23 @@
 - (void)seekToTime:(NSTimeInterval)timeInSeconds {
     if (!_audioFile) return;
     NSLog(@"timeInSeconds---- %f    %f", timeInSeconds, self.duration);
-    // 限制时间范围（timeInSeconds 是秒，duration 也是秒）
+    // 限制时间范围
     timeInSeconds = MAX(0, MIN(timeInSeconds, self.duration));
 
     AVAudioFormat *format = _audioFile.processingFormat;
     double sampleRate = format.sampleRate;
     AVAudioFramePosition newFrame = (AVAudioFramePosition)(sampleRate * timeInSeconds);
-    
-    // 确保不超出文件范围
     newFrame = MAX(0, MIN(newFrame, _audioFile.length));
 
-    // 设置新的帧位置 - 无论什么状态都要设置
+    // 通过原子变量通知渲染线程执行 seek，避免主线程直接操作 AVAudioFile
+    atomic_store(&_seekPendingFrame, (long long)newFrame);
+    atomic_store(&_seekPending, YES);
+
+    // currentFrame 供进度显示用，渲染线程会在 seek 完成后更新它
     self.currentFrame = newFrame;
-    
-    // 更新音频文件的 framePosition，确保下次读取时从正确位置开始
-    _audioFile.framePosition = newFrame;
 
-    // 如果正在播放，需要重启音频引擎以确保跳转生效
-    if (self.currentState == NoiseCancelPlayerStatePlaying) {
-
-        [_engine stop];
-        [self stopProgressTimer];
-
-        // 短暂延迟后重新开始播放
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.01 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-                    NSError *error = nil;
-                    [self->_engine prepare];
-                    if ([self->_engine startAndReturnError:&error]) {
-                        // currentTime 现在基于 currentFrame 计算，不需要设置 _startTime
-                        self->_startTime = CACurrentMediaTime();
-                        [self startProgressTimer];
-                        [self updateState:NoiseCancelPlayerStatePlaying];
-                    } else {
-                        NSLog(@"Failed to restart engine after seek: %@", error);
-                        [self updateState:NoiseCancelPlayerStateStopped];
-                    }
-                });
-    }
-    // 在非播放状态下，currentFrame 已经保存了位置，currentTime 会基于它计算
-    // 下次播放时会从 currentFrame 指定的位置开始
+    // 如果正在播放，引擎继续运行，渲染线程会在下次回调时处理 seek
+    // 不需要停止/重启引擎，也不会有并发访问 AVAudioFile 的问题
 }
 
 #pragma mark - Progress Tracking

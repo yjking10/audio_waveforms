@@ -49,8 +49,8 @@ class _PlayerPageState extends State<PlayerPage> {
     final appDirectory = await getApplicationDocumentsDirectory();
 
     // String fileName = 'audio3.mp3';
-    // String fileName = '16_16_49.opus';
-    String fileName = '1775720726.opus';
+    String fileName = '16_16_49.opus';
+
     // Opening file from assets folder
     file = File('${appDirectory.path}/$fileName');
     await file?.writeAsBytes((await rootBundle.load('assets/audios/$fileName'))
@@ -68,7 +68,7 @@ class _PlayerPageState extends State<PlayerPage> {
     controller.waveformExtraction
         .extractWaveformData(
       path: file!.path,
-      noOfSamples: MediaQuery.of(context).size.width.toInt(),
+      noOfSamples: (MediaQuery.of(context).size.width * 0.7).toInt(),
     )
         .then((waveformData) {
       setState(() {
