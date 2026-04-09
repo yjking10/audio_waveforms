@@ -49,7 +49,8 @@ class _PlayerPageState extends State<PlayerPage> {
     final appDirectory = await getApplicationDocumentsDirectory();
 
     // String fileName = 'audio3.mp3';
-    String fileName = '16_16_49.opus';
+    // String fileName = '16_16_49.opus';
+    String fileName = '1775720726.opus';
     // Opening file from assets folder
     file = File('${appDirectory.path}/$fileName');
     await file?.writeAsBytes((await rootBundle.load('assets/audios/$fileName'))
@@ -60,23 +61,20 @@ class _PlayerPageState extends State<PlayerPage> {
     }
     // Prepare player with extracting waveform if index is even.
     controller.preparePlayer(
-      path: file!.path,
-      shouldExtractWaveform: false,
-      noOfSamples: 100
-    );
+        path: file!.path, shouldExtractWaveform: false, noOfSamples: 100);
 
     print('controller-playerKey ${controller.playerKey}');
     // Extracting waveform separately if index is odd.
     controller.waveformExtraction
         .extractWaveformData(
-          path: file!.path,
-          noOfSamples: MediaQuery.of(context).size.width.toInt(),
-        )
-        .then((waveformData)  {
-          setState(() {
-            this.waveformData = waveformData;
-          });
-          print("${this.waveformData}");
+      path: file!.path,
+      noOfSamples: MediaQuery.of(context).size.width.toInt(),
+    )
+        .then((waveformData) {
+      setState(() {
+        this.waveformData = waveformData;
+      });
+      print("${this.waveformData}");
     });
   }
 
@@ -86,12 +84,9 @@ class _PlayerPageState extends State<PlayerPage> {
 
   set processingState(PlayerState value) {
     if (_processingState != value) {
-
       _processingState = value;
 
-setState(() {
-
-});
+      setState(() {});
     }
   }
 
@@ -105,7 +100,7 @@ setState(() {
   int _selectedSegment = 0;
 
   int _selectedTate = 1;
-   List<double> waveformData = [];
+  List<double> waveformData = [];
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -133,22 +128,22 @@ setState(() {
                     ),
                   ),
                   // if (!controller.playerState.isStopped)
-                    IconButton(
-                      onPressed: () async {
-                        controller.playerState.isPlaying
-                            ? await controller.pausePlayer()
-                            : await controller.startPlayer();
-                        controller.setFinishMode(finishMode: FinishMode.pause);
-                      },
-                      icon: Icon(
-                        controller.playerState.isPlaying
-                            ? Icons.stop
-                            : Icons.play_arrow,
-                      ),
-                      color: Colors.blueAccent,
-                      splashColor: Colors.transparent,
-                      highlightColor: Colors.transparent,
+                  IconButton(
+                    onPressed: () async {
+                      controller.playerState.isPlaying
+                          ? await controller.pausePlayer()
+                          : await controller.startPlayer();
+                      controller.setFinishMode(finishMode: FinishMode.pause);
+                    },
+                    icon: Icon(
+                      controller.playerState.isPlaying
+                          ? Icons.stop
+                          : Icons.play_arrow,
                     ),
+                    color: Colors.blueAccent,
+                    splashColor: Colors.transparent,
+                    highlightColor: Colors.transparent,
+                  ),
                   CupertinoSlidingSegmentedControl<int>(
                     groupValue: _selectedSegment,
                     children: const {
@@ -165,12 +160,14 @@ setState(() {
                     },
                   ),
 
-                  const SizedBox(height: 40,),
+                  const SizedBox(
+                    height: 40,
+                  ),
                   CupertinoSlidingSegmentedControl<int>(
                     groupValue: _selectedTate,
                     children: const {
                       0: Text('0.5'),
-                      1: Text('1.0') ,
+                      1: Text('1.0'),
                       2: Text('1.25'),
                       3: Text('1.5'),
                       4: Text('2.0'),
@@ -180,15 +177,15 @@ setState(() {
                         _selectedTate = value!;
                         double rate = 1.0;
 
-                        if(value ==0){
+                        if (value == 0) {
                           rate = 0.5;
-                        } else if(value == 1){
+                        } else if (value == 1) {
                           rate = 1.0;
-                        } else if(value == 2){
+                        } else if (value == 2) {
                           rate = 1.25;
-                        } else if(value == 3){
+                        } else if (value == 3) {
                           rate = 1.5;
-                        } else if(value == 4){
+                        } else if (value == 4) {
                           rate = 2.0;
                         }
                         controller.setRate(rate);

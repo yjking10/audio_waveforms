@@ -57,7 +57,6 @@ class _HomeState extends State<Home> {
     recorderController = RecorderController();
     appDirectory = await getApplicationDocumentsDirectory();
 
-
     for (final path in assetPaths) {
       final fileName = path.split('/').last;
       final file = File('${appDirectory.path}/$fileName');
@@ -69,15 +68,11 @@ class _HomeState extends State<Home> {
     isLoading = false;
     setState(() {});
 
-
-
-
     //
   }
 
-  int _i =0;
-  _generateWave(){
-
+  int _i = 0;
+  _generateWave() {
     for (final path in paths) {
       _i++;
       WaveformSyncManager.instance.addTask(_i, path);
@@ -111,12 +106,11 @@ class _HomeState extends State<Home> {
         shadowColor: Colors.grey,
         actions: [
           IconButton(
-            onPressed: (){
+            onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => PlayerPage()),
               );
-
             },
             icon: Icon(Icons.audiotrack_outlined),
             color: Colors.white,
@@ -146,9 +140,11 @@ class _HomeState extends State<Home> {
               child: Column(
                 children: [
                   const SizedBox(height: 20),
-                  ElevatedButton(onPressed: (){
-                    _generateWave();
-                  }, child: Text('Generate wave ')),
+                  ElevatedButton(
+                      onPressed: () {
+                        _generateWave();
+                      },
+                      child: Text('Generate wave ')),
                   const SizedBox(height: 20),
                   Expanded(
                     child: ListView.builder(
