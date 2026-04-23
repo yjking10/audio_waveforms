@@ -49,7 +49,8 @@ class _PlayerPageState extends State<PlayerPage> {
     final appDirectory = await getApplicationDocumentsDirectory();
 
     // String fileName = 'audio3.mp3';
-    String fileName = '16_16_49.opus';
+    String fileName = 'test.opus';
+    // fileName = '.opus';
 
     // Opening file from assets folder
     file = File('${appDirectory.path}/$fileName');
@@ -68,7 +69,8 @@ class _PlayerPageState extends State<PlayerPage> {
     controller.waveformExtraction
         .extractWaveformData(
       path: file!.path,
-      noOfSamples: (MediaQuery.of(context).size.width * 0.7).toInt(),
+      noOfSamples:
+          playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width),
     )
         .then((waveformData) {
       setState(() {
@@ -113,14 +115,14 @@ class _PlayerPageState extends State<PlayerPage> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Container(
-                    margin:
-                        const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    // margin:
+                    //     const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(10),
                       color: const Color(0xFF343145),
                     ),
                     child: AudioFileWaveforms(
-                      size: Size(MediaQuery.of(context).size.width * 0.7, 70),
+                      size: Size(MediaQuery.of(context).size.width, 70),
                       playerController: controller,
                       waveformData: waveformData,
                       waveformType: WaveformType.fitWidth,

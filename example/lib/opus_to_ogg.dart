@@ -314,6 +314,21 @@ class OpusToOgg {
 
   bool _isClosed = false;
 
+  /// 暂停时调用：将缓冲区中剩余的 Opus 包刷出为一个非 EOS 页
+  /// 确保 granulePos 与实际接收字节数同步，以便续传时正确恢复 _receivedOpusLength
+  Uint8List flushPartial() {
+    if (!_headerSent || _packetBuffer.isEmpty) return Uint8List(0);
+    final packetsToFlush = List<Uint8List>.from(_packetBuffer);
+    _granulePos += _step48k * packetsToFlush.length;
+    final page = _ogg.buildPage(
+      packets: packetsToFlush,
+      granulePos: _granulePos,
+      headerType: 0x00,
+    );
+    _packetBuffer.clear();
+    return page;
+  }
+
   /// 流结束必须调用
   Uint8List flushAndClose() {
     if (_isClosed) return Uint8List(0); // 防止重复关闭
