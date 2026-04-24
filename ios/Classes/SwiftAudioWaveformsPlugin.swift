@@ -4,7 +4,7 @@ import UIKit
 public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
     
     let audioRecorder: AudioRecorder
-    var audioPlayers = [String: AudioPlayer]()
+    var audioPlayers = [String: FlutterAudioPlayer]()
     var extractors = [String: WaveformExtractor]()
     var flutterChannel: FlutterMethodChannel
     
@@ -194,7 +194,7 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
     
     func initPlayer(playerKey: String) {
         if audioPlayers[playerKey] == nil {
-            let newPlayer = AudioPlayer(plugin: self,playerKey: playerKey,channel: flutterChannel)
+            let newPlayer = FlutterAudioPlayer(plugin: self,playerKey: playerKey,channel: flutterChannel)
             audioPlayers[playerKey] = newPlayer
         }
     }
