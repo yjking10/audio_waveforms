@@ -45,7 +45,9 @@ class _PlayerPageState extends State<PlayerPage> {
 
   void _getDir() async {}
 
-  void _preparePlayer() async {
+  Future<void> _preparePlayer() async {
+    await controller.pauseAllPlayers();
+
     final appDirectory = await getApplicationDocumentsDirectory();
 
     // String fileName = 'audio3.mp3';
@@ -55,21 +57,16 @@ class _PlayerPageState extends State<PlayerPage> {
     // fileName = '.opus';
 
     // Opening file from assets folder
-    file = File('${appDirectory.path}/audios/$fileName');
-
-    await file?.parent.create(recursive: true);
-
-    final audioBytes =
-        (await rootBundle.load('assets/audios/$fileName')).buffer.asUint8List();
-    if (!await file!.exists() || await file!.length() != audioBytes.length) {
-      await file?.writeAsBytes(audioBytes, flush: true);
-    }
+    file = File('${appDirectory.path}/$fileName');
+    final byteData = await rootBundle.load('assets/audios/$fileName');
+    final audioBytes = byteData.buffer.asUint8List();
+    await file?.writeAsBytes(audioBytes);
     if (file?.path == null) {
       return;
     }
     // Prepare player with extracting waveform if index is even.
-    controller.preparePlayer(
-        path: file!.path, shouldExtractWaveform: false, noOfSamples: 100);
+    await controller.preparePlayer(
+        path: file!.path, shouldExtractWaveform: true, noOfSamples: 100);
 
     print('controller-playerKey ${controller.playerKey}');
     // Extracting waveform separately if index is odd.
@@ -102,8 +99,6 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void dispose() {
     playerStateSubscription.cancel();
-    controller.stopPlayer();
-    controller.release();
     controller.dispose();
     super.dispose();
   }
@@ -141,9 +136,11 @@ class _PlayerPageState extends State<PlayerPage> {
                   // if (!controller.playerState.isStopped)
                   IconButton(
                     onPressed: () async {
-                      controller.playerState.isPlaying
-                          ? await controller.pausePlayer()
-                          : await controller.startPlayer();
+                      if (controller.playerState.isPlaying) {
+                        await controller.pausePlayer();
+                      } else {
+                        await controller.startPlayer();
+                      }
                       controller.setFinishMode(finishMode: FinishMode.pause);
                     },
                     icon: Icon(

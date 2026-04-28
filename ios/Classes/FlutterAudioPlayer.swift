@@ -29,6 +29,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         flutterChannel = channel
 
         self.player = AudioPlayer()
+        self.player?.isNoiseSuppressionEnabled = true
     }
 
     override func responds(to aSelector: Selector!) -> Bool {
@@ -59,7 +60,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
             return
         }
 
-        guard let audioUrl = URL(string: path) else {
+        guard let audioUrl = makeAudioURL(from: path) else {
             result(
                 FlutterError(
                     code: Constants.audioWaveforms,
@@ -89,8 +90,29 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         }
 
         do {
-            try player?.enqueue(audioUrl)
+            player?.isNoiseSuppressionEnabled = false
+
+            // Reset rate state before enqueue to avoid stale graph on older iOS.
+            playbackRate = 1.0
+            timePitchNode = nil
+
+            let decoder = try AudioDecoder(url: audioUrl)
+            try player?.enqueue(decoder, immediate: true)
             player?.delegate = self
+
+            if #available(iOS 17.0, *) {
+            } else {
+                player?.modifyProcessingGraph { [weak self] engine in
+                    guard let self = self, let player = self.player else { return }
+                    let format = player.sourceNode.outputFormat(forBus: 0)
+                    _ = self.configurePlaybackRateGraph(
+                        engine,
+                        sourceFormat: format,
+                        connectSource: true
+                    )
+                }
+            }
+
             result(true)
         } catch {
             result(
@@ -300,34 +322,20 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         guard overrideAudioSession else { return }
 
         let audioSession = AVAudioSession.sharedInstance()
-        var options: AVAudioSession.CategoryOptions = [
-            .defaultToSpeaker,
-            .allowBluetooth,
-        ]
-
-        if #available(iOS 10.0, *) {
-            options.insert(.allowBluetoothA2DP)
-        }
-
-        try audioSession.setCategory(.playAndRecord, options: options)
+        try audioSession.setCategory(.playback)
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+    }
 
-        if let bluetoothInput = audioSession.availableInputs?.first(where: {
-            $0.portType == .bluetoothHFP || $0.portType == .bluetoothA2DP
-        }) {
-            do {
-                try audioSession.setPreferredInput(bluetoothInput)
-                print("Switched to Bluetooth audio device: \(bluetoothInput.portName)")
-            } catch {
-                print("Failed to set preferred Bluetooth input: \(error.localizedDescription)")
-            }
+    private func makeAudioURL(from path: String) -> URL? {
+        if path.hasPrefix("http://") || path.hasPrefix("https://") {
+            return URL(string: path)
         }
 
-        do {
-            try audioSession.setPreferredIOBufferDuration(0.010)
-        } catch {
-            print("Failed to set preferred IO buffer duration: \(error.localizedDescription)")
+        if path.hasPrefix("file://") {
+            return URL(string: path)
         }
+
+        return URL(fileURLWithPath: path)
     }
 
     private var isDefaultPlaybackRate: Bool {
@@ -404,18 +412,24 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
             finishType = 1
 
         case .stop:
-            self.player?.stop()
-            stopListening()
             finishType = 2
+            // Dispatch to main thread to avoid destroying AudioPlayer from its own event thread
+            DispatchQueue.main.async { [weak self] in
+                self?.stopListening()
+                self?.player?.stop()
+            }
         }
 
-        plugin.flutterChannel.invokeMethod(
-            Constants.onDidFinishPlayingAudio,
-            arguments: [
-                Constants.finishType: finishType,
-                Constants.playerKey: playerKey,
-            ]
-        )
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.plugin.flutterChannel.invokeMethod(
+                Constants.onDidFinishPlayingAudio,
+                arguments: [
+                    Constants.finishType: finishType,
+                    Constants.playerKey: self.playerKey,
+                ]
+            )
+        }
     }
 
 //    func audioPlayer(_ audioPlayer: AudioPlayer, playbackStateChanged playbackState: AudioPlayerPlaybackState) {

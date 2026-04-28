@@ -67,8 +67,7 @@ class PlayerController extends ChangeNotifier {
   ///
   /// Overrides AVAudioSession settings with
   /// ```
-  /// AVAudioSession.Category: .playAndRecord
-  /// AVAudioSession.CategoryOptions: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
+  /// AVAudioSession.Category: .playback
   /// ```
   /// You may use your implementation to set your preferred configurations.
   /// Changes to this property will only take effect after you call

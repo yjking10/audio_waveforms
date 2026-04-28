@@ -97,13 +97,9 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
                 break
             case Constants.releasePlayer:
                 let key = args?[Constants.playerKey] as? String
-                if(key != nil){
-                    if let player = audioPlayers[key!] {
-                        player.release(result: result)
-                    } else {
-                        result(true)
-                    }
-                    audioPlayers[key!] = nil
+                if let key = key {
+                    audioPlayers[key]?.release(result: result)
+                    audioPlayers[key] = nil
                 } else {
                     result(FlutterError(code: Constants.audioWaveforms, message: "Can not release player", details: "Player key is null"))
                 }

@@ -36,7 +36,7 @@ class _HomeState extends State<Home> {
   late final RecorderController recorderController;
   final List<String> assetPaths = const [
     'assets/audios/audio1.mp3',
-    // 'assets/audios/audio2.mp3',
+    'assets/audios/audio2.mp3',
     'assets/audios/audio3.mp3',
     'assets/audios/audio4.mp3',
   ];
