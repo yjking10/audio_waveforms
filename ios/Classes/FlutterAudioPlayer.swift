@@ -8,6 +8,8 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     private var seekToStart = true
     private var stopWhenCompleted = false
     private var timer: Timer?
+    private var playbackRate: Float = 1.0
+    private var timePitchNode: AVAudioUnitTimePitch?
 
     private var finishMode: FinishMode = FinishMode.stop
     private var updateFrequency = 200
@@ -176,24 +178,43 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         _ level: Int?,
         _ result: @escaping FlutterResult
     ) {
-        // AudioPlayer doesn't have noise suppression
-        // This feature is not available with AudioPlayer
+        player?.isNoiseSuppressionEnabled = (level ?? 0) > 0
         result(true)
     }
 
     func setRate(_ rate: Double?, _ result: @escaping FlutterResult) {
-        // AudioPlayer uses AVAudioEngine's time pitch node for rate control
-        // This requires modifying the processing graph
-        player?.modifyProcessingGraph { engine in
-            // Rate control would need to be implemented via AVAudioUnitTimePitch
-            // For now, we'll just acknowledge the call
+        guard let rate = rate, rate.isFinite, rate > 0 else {
+            result(false)
+            return
         }
+
+        let newRate = max(0.5, min(Float(rate), 2.0))
+        if newRate == playbackRate && (newRate != 1.0 || timePitchNode == nil) {
+            result(true)
+            return
+        }
+
+        playbackRate = newRate
+        if playbackRate == 1.0 && timePitchNode == nil {
+            result(true)
+            return
+        }
+
+        player?.modifyProcessingGraph { [weak self] engine in
+            guard let self = self, let player = self.player else { return }
+            let format = player.sourceNode.outputFormat(forBus: 0)
+            _ = self.configurePlaybackRateGraph(
+                engine,
+                sourceFormat: format,
+                connectSource: true
+            )
+        }
+
         result(true)
     }
 
     func getRate(_ result: @escaping FlutterResult) {
-        // Default rate is 1.0 for AudioPlayer
-        result(1.0)
+        result(Double(playbackRate))
     }
 
     func seekTo(_ time: Int?, _ result: @escaping FlutterResult) {
@@ -247,7 +268,55 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         )
     }
 
+    @discardableResult
+    private func configurePlaybackRateGraph(
+        _ engine: AVAudioEngine,
+        sourceFormat: AVAudioFormat,
+        connectSource: Bool
+    ) -> AVAudioNode {
+        if let timePitchNode = timePitchNode {
+            engine.disconnectNodeOutput(timePitchNode)
+            engine.detach(timePitchNode)
+            self.timePitchNode = nil
+        }
+
+        if connectSource, let player = player {
+            engine.disconnectNodeOutput(player.sourceNode)
+        }
+
+        guard playbackRate != 1.0 else {
+            if connectSource, let player = player {
+                engine.connect(player.sourceNode, to: engine.mainMixerNode, format: sourceFormat)
+            }
+            return engine.mainMixerNode
+        }
+
+        let timePitchNode = AVAudioUnitTimePitch()
+        timePitchNode.rate = playbackRate
+        engine.attach(timePitchNode)
+        engine.connect(timePitchNode, to: engine.mainMixerNode, format: sourceFormat)
+
+        if connectSource, let player = player {
+            engine.connect(player.sourceNode, to: timePitchNode, format: sourceFormat)
+        }
+
+        self.timePitchNode = timePitchNode
+        return timePitchNode
+    }
+
     // MARK: - AudioPlayerDelegate Methods
+
+    func audioPlayer(
+        _ audioPlayer: AudioPlayer,
+        reconfigureProcessingGraph engine: AVAudioEngine,
+        with format: AVAudioFormat
+    ) -> AVAudioNode {
+        return configurePlaybackRateGraph(
+            engine,
+            sourceFormat: format,
+            connectSource: false
+        )
+    }
 
     func audioPlayer(_ audioPlayer: AudioPlayer, renderingComplete decoder: PCMDecoding) {
         print("audioPlayer renderingComplete")

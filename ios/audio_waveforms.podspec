@@ -35,7 +35,7 @@ A new Flutter project.
   s.pod_target_xcconfig = {
   'DEFINES_MODULE' => 'YES',
   'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-  'HEADER_SEARCH_PATHS' => '$(inherited) "${PODS_TARGET_SRCROOT}/Frameworks/webrtc_audio_processing.xcframework/ios-arm64/webrtc_audio_processing.framework/Headers" "${PODS_TARGET_SRCROOT}/Frameworks/webrtc_audio_processing.xcframework/ios-arm64/webrtc_audio_processing.framework/Headers/webrtc-audio-processing-1"',
+  'HEADER_SEARCH_PATHS' => '$(inherited)',
    }
   s.swift_version = '5.0'
 end
