@@ -56,7 +56,7 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
                                                       volume: args?[Constants.volume] as? Double,
                                                       updateFrequency: args?[Constants.updateFrequency] as? Int,
                                                       result: result,
-                                                      overrideAudioSession: (args?[Constants.overrideAudioSession] as? Bool) ?? false)
+                                                      overrideAudioSession: (args?[Constants.overrideAudioSession] as? Bool) ?? true)
                 } else {
                     result(FlutterError(code: Constants.audioWaveforms, message: "Can not prepare player", details: "Player key is null"))
                 }
@@ -98,7 +98,14 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
             case Constants.releasePlayer:
                 let key = args?[Constants.playerKey] as? String
                 if(key != nil){
-                    audioPlayers[key!]?.release(result: result)
+                    if let player = audioPlayers[key!] {
+                        player.release(result: result)
+                    } else {
+                        result(true)
+                    }
+                    audioPlayers[key!] = nil
+                } else {
+                    result(FlutterError(code: Constants.audioWaveforms, message: "Can not release player", details: "Player key is null"))
                 }
                 break;
             case Constants.seekTo:
@@ -225,4 +232,3 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
         }
     }
 }
-

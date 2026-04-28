@@ -10,6 +10,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     private var timer: Timer?
     private var playbackRate: Float = 1.0
     private var timePitchNode: AVAudioUnitTimePitch?
+    private var overrideAudioSession = true
 
     private var finishMode: FinishMode = FinishMode.stop
     private var updateFrequency = 200
@@ -28,6 +29,15 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         flutterChannel = channel
 
         self.player = AudioPlayer()
+    }
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        let reconfigureSelector = #selector(audioPlayer(_:reconfigureProcessingGraph:with:))
+        if aSelector == reconfigureSelector {
+            return !isDefaultPlaybackRate || timePitchNode != nil
+        }
+
+        return super.responds(to: aSelector)
     }
 
     func preparePlayer(
@@ -62,6 +72,20 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
 
         if let freq = updateFrequency {
             self.updateFrequency = freq
+        }
+        self.overrideAudioSession = overrideAudioSession
+
+        do {
+            try configureAudioSessionForPlayback()
+        } catch {
+            result(
+                FlutterError(
+                    code: Constants.audioWaveforms,
+                    message: "Failed to configure audio session: \(error.localizedDescription)",
+                    details: ""
+                )
+            )
+            return
         }
 
         do {
@@ -110,6 +134,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
 
     func startPlyer(result: @escaping FlutterResult) {
         do {
+            try configureAudioSessionForPlayback()
             try player?.play()
             startListening()
             result(true)
@@ -136,7 +161,10 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     }
 
     func release(result: @escaping FlutterResult) {
-
+        stopListening()
+        player?.stop()
+        timePitchNode = nil
+        playbackRate = 1.0
         player = nil
         result(true)
     }
@@ -189,13 +217,13 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         }
 
         let newRate = max(0.5, min(Float(rate), 2.0))
-        if newRate == playbackRate && (newRate != 1.0 || timePitchNode == nil) {
+        if newRate == playbackRate && (!isDefaultPlaybackRate || timePitchNode == nil) {
             result(true)
             return
         }
 
         playbackRate = newRate
-        if playbackRate == 1.0 && timePitchNode == nil {
+        if isDefaultPlaybackRate && timePitchNode == nil {
             result(true)
             return
         }
@@ -268,6 +296,44 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         )
     }
 
+    private func configureAudioSessionForPlayback() throws {
+        guard overrideAudioSession else { return }
+
+        let audioSession = AVAudioSession.sharedInstance()
+        var options: AVAudioSession.CategoryOptions = [
+            .defaultToSpeaker,
+            .allowBluetooth,
+        ]
+
+        if #available(iOS 10.0, *) {
+            options.insert(.allowBluetoothA2DP)
+        }
+
+        try audioSession.setCategory(.playAndRecord, options: options)
+        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+
+        if let bluetoothInput = audioSession.availableInputs?.first(where: {
+            $0.portType == .bluetoothHFP || $0.portType == .bluetoothA2DP
+        }) {
+            do {
+                try audioSession.setPreferredInput(bluetoothInput)
+                print("Switched to Bluetooth audio device: \(bluetoothInput.portName)")
+            } catch {
+                print("Failed to set preferred Bluetooth input: \(error.localizedDescription)")
+            }
+        }
+
+        do {
+            try audioSession.setPreferredIOBufferDuration(0.010)
+        } catch {
+            print("Failed to set preferred IO buffer duration: \(error.localizedDescription)")
+        }
+    }
+
+    private var isDefaultPlaybackRate: Bool {
+        abs(playbackRate - 1.0) < 0.0001
+    }
+
     @discardableResult
     private func configurePlaybackRateGraph(
         _ engine: AVAudioEngine,
@@ -284,7 +350,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
             engine.disconnectNodeOutput(player.sourceNode)
         }
 
-        guard playbackRate != 1.0 else {
+        guard !isDefaultPlaybackRate else {
             if connectSource, let player = player {
                 engine.connect(player.sourceNode, to: engine.mainMixerNode, format: sourceFormat)
             }

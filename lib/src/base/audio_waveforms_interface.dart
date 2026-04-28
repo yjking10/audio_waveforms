@@ -80,7 +80,7 @@ class AudioWaveformsInterface {
     required String key,
     required int frequency,
     double? volume,
-    bool overrideAudioSession = false,
+    bool overrideAudioSession = true,
   }) async {
     var result = await _methodChannel.invokeMethod(Constants.preparePlayer, {
       Constants.path: path,

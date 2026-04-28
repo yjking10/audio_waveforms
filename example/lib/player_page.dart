@@ -55,10 +55,15 @@ class _PlayerPageState extends State<PlayerPage> {
     // fileName = '.opus';
 
     // Opening file from assets folder
-    file = File('${appDirectory.path}/$fileName');
-    await file?.writeAsBytes((await rootBundle.load('assets/audios/$fileName'))
-        .buffer
-        .asUint8List());
+    file = File('${appDirectory.path}/audios/$fileName');
+
+    await file?.parent.create(recursive: true);
+
+    final audioBytes =
+        (await rootBundle.load('assets/audios/$fileName')).buffer.asUint8List();
+    if (!await file!.exists() || await file!.length() != audioBytes.length) {
+      await file?.writeAsBytes(audioBytes, flush: true);
+    }
     if (file?.path == null) {
       return;
     }
@@ -68,18 +73,18 @@ class _PlayerPageState extends State<PlayerPage> {
 
     print('controller-playerKey ${controller.playerKey}');
     // Extracting waveform separately if index is odd.
-    controller.waveformExtraction
-        .extractWaveformData(
-      path: file!.path,
-      noOfSamples:
-          playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width),
-    )
-        .then((waveformData) {
-      setState(() {
-        this.waveformData = waveformData;
-      });
-      print("${this.waveformData}");
-    });
+    // controller.waveformExtraction
+    //     .extractWaveformData(
+    //   path: file!.path,
+    //   noOfSamples:
+    //       playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width),
+    // )
+    //     .then((waveformData) {
+    //   setState(() {
+    //     this.waveformData = waveformData;
+    //   });
+    //   print("${this.waveformData}");
+    // });
   }
 
   PlayerState _processingState = PlayerState.stopped;
@@ -97,6 +102,8 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void dispose() {
     playerStateSubscription.cancel();
+    controller.stopPlayer();
+    controller.release();
     controller.dispose();
     super.dispose();
   }

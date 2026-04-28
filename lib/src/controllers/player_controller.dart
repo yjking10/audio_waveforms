@@ -67,8 +67,8 @@ class PlayerController extends ChangeNotifier {
   ///
   /// Overrides AVAudioSession settings with
   /// ```
-  /// AVAudioSession.Category: .playback
-  /// AVAudioSession.CategoryOptions: [.default]
+  /// AVAudioSession.Category: .playAndRecord
+  /// AVAudioSession.CategoryOptions: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
   /// ```
   /// You may use your implementation to set your preferred configurations.
   /// Changes to this property will only take effect after you call
@@ -77,8 +77,8 @@ class PlayerController extends ChangeNotifier {
   /// Setting this property to true will set the AudioSession in native
   /// otherwise nothing happens.
   ///
-  /// Defaults to false.
-  bool overrideAudioSession = false;
+  /// Defaults to true.
+  bool overrideAudioSession = true;
 
   /// A stream to get current state of the player. This stream
   /// will emit event whenever there is change in the playerState.
