@@ -1,16 +1,20 @@
 import AVFoundation
+import Darwin
 import Foundation
 import SFBAudioEngine
 
 class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
 
     private var player: AudioPlayer?
-    private var seekToStart = true
-    private var stopWhenCompleted = false
     private var timer: Timer?
+    private var completionWorkItem: DispatchWorkItem?
     private var playbackRate: Float = 1.0
     private var timePitchNode: AVAudioUnitTimePitch?
     private var overrideAudioSession = true
+    private var isPrepared = false
+    private var hasSentCompletionEvent = false
+    private var shouldNotifyCompletionOnStop = false
+    private var lastPreparedPath: String?
 
     private var finishMode: FinishMode = FinishMode.stop
     private var updateFrequency = 200
@@ -90,31 +94,11 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         }
 
         do {
-            player?.isNoiseSuppressionEnabled = false
-
-            // Reset rate state before enqueue to avoid stale graph on older iOS.
-            playbackRate = 1.0
-            timePitchNode = nil
-
-            let decoder = try AudioDecoder(url: audioUrl)
-            try player?.enqueue(decoder, immediate: true)
-            player?.delegate = self
-
-            if #available(iOS 17.0, *) {
-            } else {
-                player?.modifyProcessingGraph { [weak self] engine in
-                    guard let self = self, let player = self.player else { return }
-                    let format = player.sourceNode.outputFormat(forBus: 0)
-                    _ = self.configurePlaybackRateGraph(
-                        engine,
-                        sourceFormat: format,
-                        connectSource: true
-                    )
-                }
-            }
-
+            try prepareAudio(url: audioUrl)
+            lastPreparedPath = path
             result(true)
         } catch {
+            isPrepared = false
             result(
                 FlutterError(
                     code: Constants.audioWaveforms,
@@ -157,7 +141,24 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     func startPlyer(result: @escaping FlutterResult) {
         do {
             try configureAudioSessionForPlayback()
-            try player?.play()
+            print("startPlyer isPrepared=\(isPrepared)")
+            
+            if !isPrepared {
+                guard let path = lastPreparedPath,
+                      let audioUrl = AudioURLResolver.makeAudioURL(from: path) else {
+                    result(false)
+                    return
+                }
+                try prepareAudio(url: audioUrl)
+            }
+
+            guard let player = player, isPrepared else {
+                result(false)
+                return
+            }
+
+            beginPlaybackTracking()
+            try player.play()
             startListening()
             result(true)
         } catch {
@@ -172,21 +173,27 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     }
 
     func pausePlayer() {
+        cancelCompletionTracking()
         stopListening()
         _ = player?.pause()
     }
 
     func stopPlayer() {
+        cancelCompletionTracking()
         stopListening()
         player?.stop()
+        isPrepared = false
         timer = nil
     }
 
     func release(result: @escaping FlutterResult) {
+        cancelCompletionTracking()
         stopListening()
         player?.stop()
         timePitchNode = nil
         playbackRate = 1.0
+        isPrepared = false
+        lastPreparedPath = nil
         player = nil
         result(true)
     }
@@ -269,6 +276,8 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
 
     func seekTo(_ time: Int?, _ result: @escaping FlutterResult) {
         if let time = time {
+            completionWorkItem?.cancel()
+            completionWorkItem = nil
             _ = player?.seek(time: Double(time) / 1000.0)
             sendCurrentDuration()
             result(true)
@@ -289,6 +298,9 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     }
 
     func startListening() {
+        timer?.invalidate()
+        timer = nil
+
         if #available(iOS 10.0, *) {
             timer = Timer.scheduledTimer(
                 withTimeInterval: (Double(updateFrequency) / 1000),
@@ -328,6 +340,56 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
 
     private var isDefaultPlaybackRate: Bool {
         abs(playbackRate - 1.0) < 0.0001
+    }
+
+    private func prepareAudio(url audioUrl: URL) throws {
+        if player == nil {
+            player = AudioPlayer()
+        }
+        player?.isNoiseSuppressionEnabled = false
+        isPrepared = false
+
+        playbackRate = 1.0
+        timePitchNode = nil
+        resetCompletionTracking()
+
+        let decoder = try AudioDecoder(url: audioUrl)
+        try player?.enqueue(decoder, immediate: true)
+        player?.delegate = self
+        isPrepared = true
+
+        if #available(iOS 17.0, *) {
+        } else {
+            player?.modifyProcessingGraph { [weak self] engine in
+                guard let self = self, let player = self.player else { return }
+                let format = player.sourceNode.outputFormat(forBus: 0)
+                _ = self.configurePlaybackRateGraph(
+                    engine,
+                    sourceFormat: format,
+                    connectSource: true
+                )
+            }
+        }
+    }
+
+    private func resetCompletionTracking() {
+        completionWorkItem?.cancel()
+        completionWorkItem = nil
+        hasSentCompletionEvent = false
+        shouldNotifyCompletionOnStop = false
+    }
+
+    private func beginPlaybackTracking() {
+        completionWorkItem?.cancel()
+        completionWorkItem = nil
+        hasSentCompletionEvent = false
+        shouldNotifyCompletionOnStop = true
+    }
+
+    private func cancelCompletionTracking() {
+        completionWorkItem?.cancel()
+        completionWorkItem = nil
+        shouldNotifyCompletionOnStop = false
     }
 
     @discardableResult
@@ -381,32 +443,102 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     }
 
     func audioPlayer(_ audioPlayer: AudioPlayer, renderingComplete decoder: PCMDecoding) {
-        print("audioPlayer renderingComplete")
+        handlePlaybackCompletion()
+    }
+
+    func audioPlayer(
+        _ audioPlayer: AudioPlayer,
+        renderingWillComplete decoder: PCMDecoding,
+        at hostTime: UInt64
+    ) {
+        schedulePlaybackCompletion(at: hostTime)
+    }
+
+    func audioPlayerEndOfAudio(_ audioPlayer: AudioPlayer) {
+        handlePlaybackCompletion()
+    }
+
+    func audioPlayer(_ audioPlayer: AudioPlayer, nowPlayingChanged nowPlaying: PCMDecoding?) {
+        if nowPlaying == nil {
+            handlePlaybackCompletion()
+        }
+    }
+
+    func audioPlayer(_ audioPlayer: AudioPlayer, playbackStateChanged playbackState: AudioPlayer.PlaybackState) {
+        print("playbackStateChanged ====\(playbackState) shouldNotifyCompletionOnStop=\(shouldNotifyCompletionOnStop)")
+        if playbackState == .stopped && shouldNotifyCompletionOnStop {
+            handlePlaybackCompletion(forceStopped: true)
+        }
+    }
+
+    private func schedulePlaybackCompletion(at hostTime: UInt64) {
+        guard shouldNotifyCompletionOnStop, !hasSentCompletionEvent else { return }
+
+        completionWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.handlePlaybackCompletion()
+        }
+        completionWorkItem = workItem
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + secondsUntilHostTime(hostTime),
+            execute: workItem
+        )
+    }
+
+    private func secondsUntilHostTime(_ hostTime: UInt64) -> TimeInterval {
+        let now = mach_absolute_time()
+        guard hostTime > now else { return 0 }
+
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        let nanos = (hostTime - now) * UInt64(timebase.numer) / UInt64(timebase.denom)
+        return Double(nanos) / 1_000_000_000
+    }
+
+    private func handlePlaybackCompletion() {
+        handlePlaybackCompletion(forceStopped: false)
+    }
+
+    private func handlePlaybackCompletion(forceStopped: Bool) {
+        guard shouldNotifyCompletionOnStop, !hasSentCompletionEvent else { return }
+        completionWorkItem?.cancel()
+        completionWorkItem = nil
+        hasSentCompletionEvent = true
+        shouldNotifyCompletionOnStop = false
+
         var finishType = 2
 
-        switch self.finishMode {
+        switch forceStopped ? FinishMode.stop : self.finishMode {
         case .loop:
-            
-            do {
-               try self.player?.play()
-                finishType = 0
-                // try self.player?.enqueue(decoder, immediate: true)
-             
-            } catch {
-                print("Failed to loop: \(error)")
+            finishType = 0
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                do {
+                    _ = self.player?.seek(time: 0)
+                    try self.player?.play()
+                    self.startListening()
+                } catch {
+                    print("Failed to loop: \(error)")
+                }
             }
 
         case .pause:
-            _ = self.player?.pause()
-            stopListening()
             finishType = 1
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                _ = self.player?.seek(time: 0)
+                _ = self.player?.pause()
+                self.stopListening()
+                self.isPrepared = false
+            }
 
         case .stop:
             finishType = 2
-            // Dispatch to main thread to avoid destroying AudioPlayer from its own event thread
             DispatchQueue.main.async { [weak self] in
+                _ = self?.player?.seek(time: 0)
                 self?.stopListening()
-                self?.player?.stop()
+                self?.isPrepared = false
             }
         }
 
@@ -419,12 +551,11 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
                     Constants.playerKey: self.playerKey,
                 ]
             )
+            if finishType == 0 {
+                self.beginPlaybackTracking()
+            }
         }
     }
-
-//    func audioPlayer(_ audioPlayer: AudioPlayer, playbackStateChanged playbackState: AudioPlayerPlaybackState) {
-//        // Handle playback state changes if needed
-//    }
 
     func audioPlayer(_ audioPlayer: AudioPlayer, encounteredError error: Error) {
         print("Audio player error: \(error.localizedDescription)")

@@ -294,6 +294,11 @@ class PlayerController extends ChangeNotifier {
   Future<int> getDuration([DurationType? durationType]) async {
     final duration = await AudioWaveformsInterface.instance
         .getDuration(playerKey, durationType?.index ?? 1);
+    if ((durationType == null || durationType == DurationType.max) &&
+        duration != null &&
+        duration > 0) {
+      _maxDuration = duration;
+    }
     return duration ?? -1;
   }
 

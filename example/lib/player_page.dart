@@ -66,22 +66,23 @@ class _PlayerPageState extends State<PlayerPage> {
     }
     // Prepare player with extracting waveform if index is even.
     await controller.preparePlayer(
-        path: file!.path, shouldExtractWaveform: true, noOfSamples: 100);
+        path: file!.path, shouldExtractWaveform: false, noOfSamples: 100);
+    await controller.setFinishMode(finishMode: FinishMode.pause);
 
     print('controller-playerKey ${controller.playerKey}');
     // Extracting waveform separately if index is odd.
-    // controller.waveformExtraction
-    //     .extractWaveformData(
-    //   path: file!.path,
-    //   noOfSamples:
-    //       playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width),
-    // )
-    //     .then((waveformData) {
-    //   setState(() {
-    //     this.waveformData = waveformData;
-    //   });
-    //   print("${this.waveformData}");
-    // });
+    controller.waveformExtraction
+        .extractWaveformData(
+      path: file!.path,
+      noOfSamples:
+          playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width),
+    )
+        .then((waveformData) {
+      setState(() {
+        this.waveformData = waveformData;
+      });
+      print("${this.waveformData}");
+    });
   }
 
   PlayerState _processingState = PlayerState.stopped;
@@ -141,7 +142,6 @@ class _PlayerPageState extends State<PlayerPage> {
                       } else {
                         await controller.startPlayer();
                       }
-                      controller.setFinishMode(finishMode: FinishMode.pause);
                     },
                     icon: Icon(
                       controller.playerState.isPlaying
