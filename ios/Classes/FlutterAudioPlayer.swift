@@ -60,12 +60,12 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
             return
         }
 
-        guard let audioUrl = makeAudioURL(from: path) else {
+        guard let audioUrl = AudioURLResolver.makeAudioURL(from: path) else {
             result(
                 FlutterError(
                     code: Constants.audioWaveforms,
                     message: "Failed to initialise Url from provided audio file",
-                    details: "If path contains `file://` try removing it"
+                    details: "Provide an absolute local path, file:// URL, or http(s) URL"
                 )
             )
             return
@@ -326,18 +326,6 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
     }
 
-    private func makeAudioURL(from path: String) -> URL? {
-        if path.hasPrefix("http://") || path.hasPrefix("https://") {
-            return URL(string: path)
-        }
-
-        if path.hasPrefix("file://") {
-            return URL(string: path)
-        }
-
-        return URL(fileURLWithPath: path)
-    }
-
     private var isDefaultPlaybackRate: Bool {
         abs(playbackRate - 1.0) < 0.0001
     }
@@ -398,10 +386,12 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
 
         switch self.finishMode {
         case .loop:
+            
             do {
-                try self.player?.enqueue(decoder, immediate: true)
-                try self.player?.play()
+               try self.player?.play()
                 finishType = 0
+                // try self.player?.enqueue(decoder, immediate: true)
+             
             } catch {
                 print("Failed to loop: \(error)")
             }
