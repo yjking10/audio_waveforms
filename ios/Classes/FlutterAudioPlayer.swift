@@ -3,9 +3,10 @@ import Darwin
 import Foundation
 import SFBAudioEngine
 
-class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
+class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate {
 
     private var player: AudioPlayer?
+    private var systemPlayer: AVAudioPlayer?
     private var timer: Timer?
     private var completionWorkItem: DispatchWorkItem?
     private var playbackRate: Float = 1.0
@@ -15,12 +16,18 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     private var hasSentCompletionEvent = false
     private var shouldNotifyCompletionOnStop = false
     private var lastPreparedPath: String?
+    private var playbackBackend = PlaybackBackend.sfbaudioEngine
 
     private var finishMode: FinishMode = FinishMode.stop
     private var updateFrequency = 200
     var plugin: SwiftAudioWaveformsPlugin
     var playerKey: String
     var flutterChannel: FlutterMethodChannel
+
+    private enum PlaybackBackend {
+        case sfbaudioEngine
+        case systemAudioPlayer
+    }
 
     init(
         plugin: SwiftAudioWaveformsPlugin,
@@ -152,13 +159,25 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
                 try prepareAudio(url: audioUrl)
             }
 
-            guard let player = player, isPrepared else {
+            guard isPrepared else {
                 result(false)
                 return
             }
 
             beginPlaybackTracking()
-            try player.play()
+            switch playbackBackend {
+            case .sfbaudioEngine:
+                guard let player = player else {
+                    result(false)
+                    return
+                }
+                try player.play()
+            case .systemAudioPlayer:
+                guard systemPlayer?.play() == true else {
+                    result(false)
+                    return
+                }
+            }
             startListening()
             result(true)
         } catch {
@@ -175,13 +194,24 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     func pausePlayer() {
         cancelCompletionTracking()
         stopListening()
-        _ = player?.pause()
+        switch playbackBackend {
+        case .sfbaudioEngine:
+            _ = player?.pause()
+        case .systemAudioPlayer:
+            systemPlayer?.pause()
+        }
     }
 
     func stopPlayer() {
         cancelCompletionTracking()
         stopListening()
-        player?.stop()
+        switch playbackBackend {
+        case .sfbaudioEngine:
+            player?.stop()
+        case .systemAudioPlayer:
+            systemPlayer?.stop()
+            systemPlayer?.currentTime = 0
+        }
         isPrepared = false
         timer = nil
     }
@@ -190,6 +220,8 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         cancelCompletionTracking()
         stopListening()
         player?.stop()
+        systemPlayer?.stop()
+        systemPlayer = nil
         timePitchNode = nil
         playbackRate = 1.0
         isPrepared = false
@@ -202,10 +234,24 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         throws
     {
         if type == .Current {
-            let ms = (player?.currentTime ?? 0) * 1000
+            let currentTime: TimeInterval
+            switch playbackBackend {
+            case .sfbaudioEngine:
+                currentTime = player?.currentTime ?? 0
+            case .systemAudioPlayer:
+                currentTime = systemPlayer?.currentTime ?? 0
+            }
+            let ms = currentTime * 1000
             result(Int(ms))
         } else {
-            let ms = (player?.totalTime ?? 0) * 1000
+            let totalTime: TimeInterval
+            switch playbackBackend {
+            case .sfbaudioEngine:
+                totalTime = player?.totalTime ?? 0
+            case .systemAudioPlayer:
+                totalTime = systemPlayer?.duration ?? 0
+            }
+            let ms = totalTime * 1000
             print("player?.totalTime----------------\(ms)")
             result(Int(ms))
         }
@@ -252,6 +298,13 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         }
 
         playbackRate = newRate
+        if playbackBackend == .systemAudioPlayer {
+            systemPlayer?.enableRate = true
+            systemPlayer?.rate = playbackRate
+            result(true)
+            return
+        }
+
         if isDefaultPlaybackRate && timePitchNode == nil {
             result(true)
             return
@@ -278,7 +331,13 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         if let time = time {
             completionWorkItem?.cancel()
             completionWorkItem = nil
-            _ = player?.seek(time: Double(time) / 1000.0)
+            let seconds = Double(time) / 1000.0
+            switch playbackBackend {
+            case .sfbaudioEngine:
+                _ = player?.seek(time: seconds)
+            case .systemAudioPlayer:
+                systemPlayer?.currentTime = seconds
+            }
             sendCurrentDuration()
             result(true)
         } else {
@@ -321,7 +380,14 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     }
 
     func sendCurrentDuration() {
-        let ms = (player?.currentTime ?? 0) * 1000
+        let currentTime: TimeInterval
+        switch playbackBackend {
+        case .sfbaudioEngine:
+            currentTime = player?.currentTime ?? 0
+        case .systemAudioPlayer:
+            currentTime = systemPlayer?.currentTime ?? 0
+        }
+        let ms = currentTime * 1000
         flutterChannel.invokeMethod(
             Constants.onCurrentDuration,
             arguments: [
@@ -343,10 +409,19 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
     }
 
     private func prepareAudio(url audioUrl: URL) throws {
+        if shouldUseSystemAudioPlayer(for: audioUrl) {
+            try prepareSystemAudioPlayer(url: audioUrl)
+            return
+        }
+
+        systemPlayer?.stop()
+        systemPlayer = nil
+        playbackBackend = .sfbaudioEngine
+
         if player == nil {
             player = AudioPlayer()
         }
-        player?.isNoiseSuppressionEnabled = false
+        player?.isNoiseSuppressionEnabled = true
         isPrepared = false
 
         playbackRate = 1.0
@@ -357,19 +432,45 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         try player?.enqueue(decoder, immediate: true)
         player?.delegate = self
         isPrepared = true
+    }
+
+    private func prepareSystemAudioPlayer(url audioUrl: URL) throws {
+        player?.stop()
+        systemPlayer?.stop()
+
+        playbackBackend = .systemAudioPlayer
+        isPrepared = false
+
+        playbackRate = 1.0
+        timePitchNode = nil
+        resetCompletionTracking()
+
+        let audioPlayer = try AVAudioPlayer(contentsOf: audioUrl)
+        audioPlayer.delegate = self
+        audioPlayer.enableRate = true
+        audioPlayer.rate = playbackRate
+        audioPlayer.prepareToPlay()
+
+        systemPlayer = audioPlayer
+        isPrepared = true
+    }
+
+    private func shouldUseSystemAudioPlayer(for audioUrl: URL) -> Bool {
+        guard audioUrl.isFileURL,
+              audioUrl.pathExtension.lowercased() == "mp3" else {
+            return false
+        }
 
         if #available(iOS 17.0, *) {
-        } else {
-            player?.modifyProcessingGraph { [weak self] engine in
-                guard let self = self, let player = self.player else { return }
-                let format = player.sourceNode.outputFormat(forBus: 0)
-                _ = self.configurePlaybackRateGraph(
-                    engine,
-                    sourceFormat: format,
-                    connectSource: true
-                )
-            }
+            return false
         }
+
+        guard let audioFile = try? AVAudioFile(forReading: audioUrl) else {
+            return true
+        }
+
+        let format = audioFile.fileFormat
+        return format.sampleRate <= 24_000 || format.channelCount == 1
     }
 
     private func resetCompletionTracking() {
@@ -515,8 +616,14 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 do {
-                    _ = self.player?.seek(time: 0)
-                    try self.player?.play()
+                    switch self.playbackBackend {
+                    case .sfbaudioEngine:
+                        _ = self.player?.seek(time: 0)
+                        try self.player?.play()
+                    case .systemAudioPlayer:
+                        self.systemPlayer?.currentTime = 0
+                        self.systemPlayer?.play()
+                    }
                     self.startListening()
                 } catch {
                     print("Failed to loop: \(error)")
@@ -527,8 +634,14 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
             finishType = 1
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                _ = self.player?.seek(time: 0)
-                _ = self.player?.pause()
+                switch self.playbackBackend {
+                case .sfbaudioEngine:
+                    _ = self.player?.seek(time: 0)
+                    _ = self.player?.pause()
+                case .systemAudioPlayer:
+                    self.systemPlayer?.currentTime = 0
+                    self.systemPlayer?.pause()
+                }
                 self.stopListening()
                 self.isPrepared = false
             }
@@ -536,9 +649,16 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
         case .stop:
             finishType = 2
             DispatchQueue.main.async { [weak self] in
-                _ = self?.player?.seek(time: 0)
-                self?.stopListening()
-                self?.isPrepared = false
+                guard let self = self else { return }
+                switch self.playbackBackend {
+                case .sfbaudioEngine:
+                    _ = self.player?.seek(time: 0)
+                case .systemAudioPlayer:
+                    self.systemPlayer?.currentTime = 0
+                    self.systemPlayer?.stop()
+                }
+                self.stopListening()
+                self.isPrepared = false
             }
         }
 
@@ -559,5 +679,15 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate {
 
     func audioPlayer(_ audioPlayer: AudioPlayer, encounteredError error: Error) {
         print("Audio player error: \(error.localizedDescription)")
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        handlePlaybackCompletion()
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        if let error = error {
+            print("System audio player error: \(error.localizedDescription)")
+        }
     }
 }
