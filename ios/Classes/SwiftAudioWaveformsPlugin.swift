@@ -205,7 +205,7 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
     func createOrUpdateExtractor(playerKey: String, result: @escaping FlutterResult,path: String?, noOfSamples: Int?) {
         if(!(path ?? "").isEmpty) {
             do {
-                let audioUrl = AudioURLResolver.makeAudioURL(from: path!)
+                let audioUrl = URL(string: path!)
                 if(audioUrl == nil){
                     result(FlutterError(code: Constants.audioWaveforms, message: "Failed to initialise Url from provided audio file", details: "Provide an absolute local path, file:// URL, or http(s) URL"))
                     return

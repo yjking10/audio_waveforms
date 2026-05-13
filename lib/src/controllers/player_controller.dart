@@ -146,14 +146,7 @@ class PlayerController extends ChangeNotifier {
       'Use noOfSamples for fixed count OR noOfSamplesPerSecond for dynamic calculation based on duration.',
     );
 
-    if (!path.startsWith('http')) {
-      // Keep the full URL for remote files and strip for local files
-      final uri = Uri.tryParse(path);
-      if (uri == null) {
-        throw ArgumentError('Invalid path format: $path');
-      }
-      path = uri.path;
-    }
+    path = _pathForNativePlayer(path);
     final isPrepared = await AudioWaveformsInterface.instance.preparePlayer(
       path: path,
       key: playerKey,
@@ -198,6 +191,15 @@ class PlayerController extends ChangeNotifier {
       );
     }
     notifyListeners();
+  }
+
+  String _pathForNativePlayer(String path) {
+    final uri = Uri.tryParse(path);
+    if (uri?.hasScheme == true) {
+      return path;
+    }
+
+    return Uri.file(path).toString();
   }
 
   /// A function to start the player to play/resume the audio.

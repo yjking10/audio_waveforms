@@ -71,7 +71,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
             return
         }
 
-        guard let audioUrl = AudioURLResolver.makeAudioURL(from: path) else {
+        guard let audioUrl = URL(string: path) else {
             result(
                 FlutterError(
                     code: Constants.audioWaveforms,
@@ -152,7 +152,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
             
             if !isPrepared {
                 guard let path = lastPreparedPath,
-                      let audioUrl = AudioURLResolver.makeAudioURL(from: path) else {
+                      let audioUrl = URL(string: path) else {
                     result(false)
                     return
                 }

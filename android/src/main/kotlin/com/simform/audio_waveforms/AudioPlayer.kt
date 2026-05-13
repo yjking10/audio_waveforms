@@ -32,7 +32,7 @@ class AudioPlayer(
             volume: Float?,
             frequency: Long?,
     ) {
-        if (path != null) {
+        if (!path.isNullOrEmpty()) {
             frequency?.let {
                 updateFrequency = it
             }
@@ -92,7 +92,7 @@ class AudioPlayer(
             }
             player?.addListener(playerListener!!)
         } else {
-            result.error(Constants.LOG_TAG, "path to audio file or unique key can't be null", "")
+            result.error(Constants.LOG_TAG, "Audio file path can't be empty or null", "")
         }
     }
 
