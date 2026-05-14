@@ -51,6 +51,8 @@ class WaveformExtractor(
     private var progress = 0F
     /** Number of processed chunks */
     private var currentProgress = 0F
+    /** Safe point count used for division and progress calculation */
+    private val safeExpectedPoints = expectedPoints.coerceAtLeast(1)
 
     /** Latch for synchronizing completion of the extraction process */
     private val finishCount = CountDownLatch(1)
@@ -65,7 +67,7 @@ class WaveformExtractor(
     /** Total number of audio samples */
     private var totalSamples = 0L
     /** Number of audio samples per waveform data point */
-    private var perSamplePoints = 0L
+    private var perSamplePoints = 1L
     /** Flag to prevent submitting multiple results */
     private var isReplySubmitted = false
 
@@ -117,9 +119,10 @@ class WaveformExtractor(
         try {
             val format = getFormat(path) ?: error("No audio format found")
             val mime = format.getString(MediaFormat.KEY_MIME) ?: error("No MIME type found")
-            decoder = MediaCodec.createDecoderByType(mime).also {
-                it.configure(format, null, null, 0)
-                it.setCallback(object : MediaCodec.Callback() {
+            val codec = MediaCodec.createDecoderByType(mime)
+            decoder = codec
+            codec.configure(format, null, null, 0)
+            codec.setCallback(object : MediaCodec.Callback() {
                     override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
                         if (inputEof || index < 0) return
                         val extractor = extractor ?: return
@@ -132,11 +135,7 @@ class WaveformExtractor(
                                     extractor.advance()
                                 } catch (e: Exception) {
                                     inputEof = true
-                                    result.error(
-                                        Constants.LOG_TAG,
-                                        e.message,
-                                        "Invalid input buffer."
-                                    )
+                                    submitError(e.message, "Invalid input buffer.")
                                 }
                             } else {
                                 codec.queueInputBuffer(
@@ -169,19 +168,14 @@ class WaveformExtractor(
                             16
                         }
                         totalSamples = (sampleRate.toLong() * durationMillis) / 1000
-                        perSamplePoints = totalSamples / expectedPoints
+                        perSamplePoints = (totalSamples / safeExpectedPoints).coerceAtLeast(1L)
                     }
 
                     override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
-                        if (!isReplySubmitted) {
-                            result.error(
-                                Constants.LOG_TAG,
-                                e.message,
-                                "An error is thrown while decoding the audio file"
-                            )
-                            isReplySubmitted = true
-                            finishCount.countDown()
-                        }
+                        submitError(
+                            e.message,
+                            "An error is thrown while decoding the audio file"
+                        )
                     }
 
                     override fun onOutputBufferAvailable(
@@ -216,6 +210,10 @@ class WaveformExtractor(
                                         }
                                     } catch (e: Exception) {
                                         Log.e(Constants.LOG_TAG, "Error processing output buffer: ${e.message}")
+                                        submitError(
+                                            e.message,
+                                            "Error processing decoded audio buffer."
+                                        )
                                     }
                                 }
                             }
@@ -228,27 +226,20 @@ class WaveformExtractor(
                             }
                         }
 
-                        if (info.isEof()) {
-                            updateProgress()
-                            val rms = sqrt(sampleSum / perSamplePoints).toFloat()
-                            sendProgress(rms)
-                            stop()
+                        if (!isReplySubmitted && info.isEof()) {
+                            sendPendingSample()
+                            submitSuccess()
                         }
                     }
 
-                })
-                it.start()
-            }
+            })
+            codec.start()
 
         } catch (e: Exception) {
-            if (!isReplySubmitted) {
-                result.error(
-                    Constants.LOG_TAG,
-                    e.message,
-                    "An error is thrown before decoding the audio file"
-                )
-                isReplySubmitted = true
-            }
+            submitError(
+                e.message,
+                "An error is thrown before decoding the audio file"
+            )
         }
 
 
@@ -272,20 +263,11 @@ class WaveformExtractor(
      * @param value The normalized audio sample value (-1.0 to 1.0)
      */
     private fun handleBufferDivision(value: Float) {
-        if (sampleCount == perSamplePoints) {
-            updateProgress()
-
-            // Discard redundant values and release resources
-            if (progress > 1.0F) {
-                stop()
-                return
-            }
-            val rms = sqrt(sampleSum / perSamplePoints).toFloat()
-            sendProgress(rms)
-        }
-
         sampleCount++
         sampleSum += value.toDouble().pow(2.0)
+        if (sampleCount >= perSamplePoints) {
+            sendPendingSample()
+        }
     }
 
     /**
@@ -362,8 +344,8 @@ class WaveformExtractor(
      * extraction progress as a ratio of current to expected data points.
      */
     private fun updateProgress() {
-        currentProgress++
-        progress = currentProgress / expectedPoints
+        currentProgress = (sampleData.size + 1).toFloat()
+        progress = (currentProgress / safeExpectedPoints).coerceIn(0F, 1F)
     }
 
     /**
@@ -378,19 +360,74 @@ class WaveformExtractor(
      * @param rms The calculated RMS value for this data point
      */
     private fun sendProgress(rms: Float) {
+        val safeProgress = progress.coerceIn(0F, 1F)
         sampleData.add(rms)
-        extractorCallBack.onProgress(progress)
+        extractorCallBack.onProgress(safeProgress)
         sampleCount = 0
         sampleSum = 0.0
 
         val args: MutableMap<String, Any?> = HashMap()
         args[Constants.waveformData] = sampleData
-        args[Constants.progress] = progress
+        args[Constants.progress] = safeProgress
         args[Constants.playerKey] = key
         methodChannel.invokeMethod(
             Constants.onCurrentExtractedWaveformData,
             args
         )
+    }
+
+    private fun sendPendingSample() {
+        if (sampleCount <= 0) return
+        if (sampleData.size >= safeExpectedPoints) {
+            sampleCount = 0
+            sampleSum = 0.0
+            return
+        }
+
+        updateProgress()
+        val rms = sqrt(sampleSum / sampleCount.coerceAtLeast(1L)).toFloat()
+        sendProgress(if (rms.isNaN() || rms.isInfinite()) 0F else rms)
+    }
+
+    private fun submitSuccess() {
+        if (isReplySubmitted) return
+
+        isReplySubmitted = true
+        progress = 1.0F
+        extractorCallBack.onProgress(progress)
+        result.success(sampleData)
+        releaseResources()
+    }
+
+    private fun submitError(message: String?, details: String) {
+        if (isReplySubmitted) return
+
+        isReplySubmitted = true
+        result.error(Constants.LOG_TAG, message, details)
+        releaseResources()
+    }
+
+    private fun releaseResources() {
+        try {
+            decoder?.stop()
+        } catch (e: Exception) {
+            Log.e(Constants.LOG_TAG, "Error stopping decoder: ${e.message}")
+        }
+
+        try {
+            decoder?.release()
+        } catch (e: Exception) {
+            Log.e(Constants.LOG_TAG, "Error releasing decoder: ${e.message}")
+        }
+        decoder = null
+
+        try {
+            extractor?.release()
+        } catch (e: Exception) {
+            Log.e(Constants.LOG_TAG, "Error releasing extractor: ${e.message}")
+        }
+        extractor = null
+        finishCount.countDown()
     }
 
     /**
@@ -402,10 +439,7 @@ class WaveformExtractor(
      * 3. Signals completion via the countdown latch
      */
     fun stop() {
-        decoder?.stop()
-        decoder?.release()
-        extractor?.release()
-        finishCount.countDown()
+        releaseResources()
     }
 }
 
