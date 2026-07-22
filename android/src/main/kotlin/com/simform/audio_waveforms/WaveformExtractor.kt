@@ -1,466 +1,245 @@
 package com.simform.audio_waveforms
 
 import android.content.Context
-import android.media.AudioFormat
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.os.Build
-import android.util.Log
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import com.linc.amplituda.Amplituda
+import com.linc.amplituda.Compress
 import io.flutter.plugin.common.MethodChannel
-import java.nio.ByteBuffer
-import java.util.concurrent.CountDownLatch
-import kotlin.math.pow
-import kotlin.math.sqrt
-import androidx.core.net.toUri
+import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.ceil
+import kotlin.math.max
 
 /**
- * WaveformExtractor handles the process of extracting amplitude data from audio files
- * to generate waveform visualizations.
- * 
- * This class uses the Android MediaCodec API to decode audio files and extract
- * RMS (Root Mean Square) values at regular intervals, which represent the amplitude
- * of the audio signal. These values can then be used to draw waveform visualizations.
- * 
- * The extractor supports various audio formats and bit depths (8-bit, 16-bit, and 32-bit)
- * and handles both mono and stereo audio channels.
+ * Extracts a fixed-width overview waveform with Amplituda's native FFmpeg
+ * decoder. The entire source is processed, but native compression limits the
+ * intermediate amplitude data to at least one sample per second.
  */
 class WaveformExtractor(
-    /** Path to the audio file to analyze */
     private val path: String,
-    /** Number of waveform data points to generate */
-    private val expectedPoints: Int,
-    /** Unique identifier for this extraction process */
-    private val key: String,
-    /** Method channel for sending progress updates to Flutter */
-    private val methodChannel: MethodChannel,
-    /** Result callback for sending the final result back to Flutter */
+    expectedPoints: Int,
+    private val requestedSamplesPerSecond: Int?,
     private val result: MethodChannel.Result,
-    /** Callback for notifying about progress changes */
-    private val extractorCallBack: ExtractorCallBack,
-    /** Application context for accessing content URIs */
     private val context: Context,
 ) {
-    /** MediaCodec for decoding audio data */
-    private var decoder: MediaCodec? = null
-    /** MediaExtractor for reading audio tracks from the file */
-    private var extractor: MediaExtractor? = null
-    /** Duration of the audio file in milliseconds */
-    private var durationMillis = 0L
-    /** Current extraction progress (0.0 to 1.0) */
-    private var progress = 0F
-    /** Number of processed chunks */
-    private var currentProgress = 0F
-    /** Safe point count used for division and progress calculation */
-    private val safeExpectedPoints = expectedPoints.coerceAtLeast(1)
+    private val expectedPoints = expectedPoints.coerceAtLeast(1)
+    private val cancelled = AtomicBoolean(false)
+    private val replySubmitted = AtomicBoolean(false)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** Latch for synchronizing completion of the extraction process */
-    private val finishCount = CountDownLatch(1)
-    /** Flag indicating end of input data */
-    private var inputEof = false
-    /** Sample rate of the audio in Hz */
-    private var sampleRate = 0
-    /** Number of audio channels (1=mono, 2=stereo) */
-    private var channels = 1
-    /** Bit depth of the audio (8, 16, or 32) */
-    private var pcmEncodingBit = 16
-    /** Total number of audio samples */
-    private var totalSamples = 0L
-    /** Number of audio samples per waveform data point */
-    private var perSamplePoints = 1L
-    /** Flag to prevent submitting multiple results */
-    private var isReplySubmitted = false
+    @Volatile
+    private var temporarySource: File? = null
 
-    /**
-     * Retrieves the audio format from the given media file
-     *
-     * This method:
-     * 1. Creates a MediaExtractor to read the file
-     * 2. Finds the first audio track in the file
-     * 3. Retrieves and selects that track
-     * 4. Extracts the audio duration
-     *
-     * @param path Path to the audio file (content URI format)
-     * @return MediaFormat of the audio track, or null if no audio track is found
-     */
-    private fun getFormat(path: String): MediaFormat? {
-        if (path.isEmpty()) {
-            return null
-        }
-        val mediaExtractor = MediaExtractor()
-        this.extractor = mediaExtractor
-        val uri = path.toUri()
-        mediaExtractor.setDataSource(context, uri, null)
-        val trackCount = mediaExtractor.trackCount
-        repeat(trackCount) {
-            val format = mediaExtractor.getTrackFormat(it)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-            if (mime.contains("audio")) {
-                durationMillis = format.getLong(MediaFormat.KEY_DURATION) / 1000
-                mediaExtractor.selectTrack(it)
-                return format
-            }
-        }
-        return null
-    }
-
-    /**
-     * Starts the decoding and waveform extraction process
-     * 
-     * This method initializes the MediaCodec decoder with appropriate
-     * callbacks to process audio frames. It handles:
-     * 1. Setting up the decoder with the proper format
-     * 2. Processing input buffers from the MediaExtractor
-     * 3. Processing decoded PCM audio data in output buffers
-     * 4. Calculating RMS values for waveform visualization
-     * 5. Reporting progress via the callback interface and method channel
-     */
+    /** Starts extraction without blocking the Flutter platform thread. */
     fun startDecode() {
-        try {
-            val format = getFormat(path) ?: error("No audio format found")
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: error("No MIME type found")
-            val codec = MediaCodec.createDecoderByType(mime)
-            decoder = codec
-            codec.configure(format, null, null, 0)
-            codec.setCallback(object : MediaCodec.Callback() {
-                    override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
-                        if (inputEof || index < 0) return
-                        val extractor = extractor ?: return
-                        codec.getInputBuffer(index)?.let { buf ->
-                            val size = extractor.readSampleData(buf, 0)
-                            val sampleTime = extractor.sampleTime
-                            if (size > 0 && sampleTime >= 0) {
+        extractionExecutor.execute {
+            try {
+                if (cancelled.get()) return@execute
+                val source = resolveSource(path)
+                if (cancelled.get()) {
+                    cleanupTemporarySource()
+                    return@execute
+                }
+
+                val durationMillis = readDurationMillis(source)
+                val targetPoints = requestedSamplesPerSecond
+                    ?.coerceAtLeast(1)
+                    ?.times(durationMillis / 1000.0)
+                    ?.let { ceil(it).toInt().coerceAtLeast(1) }
+                    ?: expectedPoints
+                val samplesPerSecond = requestedSamplesPerSecond
+                    ?.coerceAtLeast(1)
+                    ?: samplesPerSecond(durationMillis, targetPoints)
+                val compress = Compress.withParams(Compress.AVERAGE, samplesPerSecond)
+
+                Amplituda(context)
+                    .processAudio(source, compress)
+                    .get(
+                        { amplitudaResult ->
+                            try {
+                                if (!cancelled.get()) {
+                                    submitSuccess(
+                                        aggregateAndNormalize(
+                                            amplitudaResult.amplitudesAsList(),
+                                            targetPoints,
+                                        ),
+                                    )
+                                }
+                            } finally {
+                                cleanupTemporarySource()
+                            }
+                        },
+                        { exception ->
+                            // Amplituda's bundled FFmpeg decoder rejects some otherwise
+                            // valid streams (for example, it can fail while submitting an
+                            // AAC packet). Do not expose that implementation limitation as
+                            // a Flutter error: fall back to Android's codec for this source.
+                            extractionExecutor.execute {
                                 try {
-                                    codec.queueInputBuffer(index, 0, size, sampleTime, 0)
-                                    extractor.advance()
-                                } catch (e: Exception) {
-                                    inputEof = true
-                                    submitError(e.message, "Invalid input buffer.")
-                                }
-                            } else {
-                                codec.queueInputBuffer(
-                                    index,
-                                    0,
-                                    0,
-                                    0,
-                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                                )
-                                inputEof = true
-                            }
-                        }
-                    }
-
-                    override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
-                        sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                        channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                        pcmEncodingBit = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
-                                when (format.getInteger(MediaFormat.KEY_PCM_ENCODING)) {
-                                    AudioFormat.ENCODING_PCM_16BIT -> 16
-                                    AudioFormat.ENCODING_PCM_8BIT -> 8
-                                    AudioFormat.ENCODING_PCM_FLOAT -> 32
-                                    else -> 16
-                                }
-                            } else {
-                                16
-                            }
-                        } else {
-                            16
-                        }
-                        totalSamples = (sampleRate.toLong() * durationMillis) / 1000
-                        perSamplePoints = (totalSamples / safeExpectedPoints).coerceAtLeast(1L)
-                    }
-
-                    override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
-                        submitError(
-                            e.message,
-                            "An error is thrown while decoding the audio file"
-                        )
-                    }
-
-                    override fun onOutputBufferAvailable(
-                        codec: MediaCodec,
-                        index: Int,
-                        info: MediaCodec.BufferInfo
-                    ) {
-                        if (index < 0 || decoder == null) return
-                        
-                        try {
-                            if (info.size > 0) {
-                                codec.getOutputBuffer(index)?.let { buf ->
-                                    try {
-                                        val size = info.size
-                                        // Set both position and limit to ensure buffer is accessible
-                                        buf.position(info.offset)
-                                        buf.limit(info.offset + info.size)
-                                        
-                                        when (pcmEncodingBit) {
-                                            8 -> {
-                                                handle8bit(size, buf)
-                                            }
-                                            16 -> {
-                                                handle16bit(size, buf)
-                                            }
-                                            32 -> {
-                                                handle32bit(size, buf)
-                                            }
-                                            else -> {
-                                                Log.e(Constants.LOG_TAG, "Unsupported PCM encoding bit: $pcmEncodingBit")
-                                            }
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e(Constants.LOG_TAG, "Error processing output buffer: ${e.message}")
+                                    if (!cancelled.get()) {
+                                        val waveform = PlatformWaveformDecoder(
+                                            source = source,
+                                            expectedPoints = targetPoints,
+                                            durationMillis = durationMillis,
+                                            isCancelled = cancelled::get,
+                                        ).decode()
+                                        if (!cancelled.get()) submitSuccess(waveform)
+                                    }
+                                } catch (fallbackException: Exception) {
+                                    if (!cancelled.get()) {
                                         submitError(
-                                            e.message,
-                                            "Error processing decoded audio buffer."
+                                            fallbackException.message
+                                                ?: exception.message
+                                                ?: "Failed to extract waveform data.",
+                                            "Both the fast and Android compatibility decoders could not process the audio source.",
                                         )
                                     }
+                                } finally {
+                                    cleanupTemporarySource()
                                 }
                             }
-                        } finally {
-                            // Always release the buffer, even if processing failed
-                            try {
-                                codec.releaseOutputBuffer(index, false)
-                            } catch (e: IllegalStateException) {
-                                Log.e(Constants.LOG_TAG, "Error releasing output buffer: ${e.message}")
-                            }
-                        }
-
-                        if (!isReplySubmitted && info.isEof()) {
-                            sendPendingSample()
-                            submitSuccess()
-                        }
-                    }
-
-            })
-            codec.start()
-
-        } catch (e: Exception) {
-            submitError(
-                e.message,
-                "An error is thrown before decoding the audio file"
-            )
-        }
-
-
-    }
-
-    /** Collected waveform amplitude data points */
-    var sampleData = ArrayList<Float>()
-    /** Count of samples processed for the current data point */
-    private var sampleCount = 0L
-    /** Sum of squared sample values for RMS calculation */
-    private var sampleSum = 0.0
-
-    /**
-     * Processes each audio sample and accumulates data for RMS calculation
-     *
-     * This method:
-     * 1. Accumulates squared sample values
-     * 2. When enough samples are collected for a data point, calculates the RMS
-     * 3. Updates progress and sends the new data point to Flutter
-     * 
-     * @param value The normalized audio sample value (-1.0 to 1.0)
-     */
-    private fun handleBufferDivision(value: Float) {
-        sampleCount++
-        sampleSum += value.toDouble().pow(2.0)
-        if (sampleCount >= perSamplePoints) {
-            sendPendingSample()
-        }
-    }
-
-    /**
-     * Processes 8-bit PCM audio data
-     *
-     * Reads 8-bit samples from the buffer, normalizes them to the range [-1.0, 1.0],
-     * and passes them to handleBufferDivision for RMS calculation.
-     * 
-     * @param size Size of the buffer in bytes
-     * @param buf ByteBuffer containing the audio data
-     */
-    private fun handle8bit(size: Int, buf: ByteBuffer) {
-        repeat(size / if (channels == 2) 2 else 1) {
-            val result = buf.get().toInt() / Constants.EIGHT_BITS
-            if (channels == 2) {
-                buf.get()
+                        },
+                    )
+            } catch (exception: Exception) {
+                cleanupTemporarySource()
+                if (!cancelled.get()) {
+                    submitError(
+                        exception.message ?: "Failed to prepare audio source.",
+                        "Only local file and content URIs are supported for waveform extraction.",
+                    )
+                }
             }
-            handleBufferDivision(result)
         }
     }
 
     /**
-     * Processes 16-bit PCM audio data
-     *
-     * Reads 16-bit samples from the buffer, normalizes them to the range [-1.0, 1.0],
-     * and passes them to handleBufferDivision for RMS calculation.
-     * 
-     * @param size Size of the buffer in bytes
-     * @param buf ByteBuffer containing the audio data
-     */
-    private fun handle16bit(size: Int, buf: ByteBuffer) {
-        repeat(size / if (channels == 2) 4 else 2) {
-            val first = buf.get().toInt()
-            val second = buf.get().toInt() shl 8
-            val value = (first or second) / Constants.SIXTEEN_BITS
-            if (channels == 2) {
-                buf.get()
-                buf.get()
-            }
-            handleBufferDivision(value)
-        }
-    }
-
-    /**
-     * Processes 32-bit PCM audio data
-     *
-     * Reads 32-bit samples from the buffer, normalizes them to the range [-1.0, 1.0],
-     * and passes them to handleBufferDivision for RMS calculation.
-     * 
-     * @param size Size of the buffer in bytes
-     * @param buf ByteBuffer containing the audio data
-     */
-    private fun handle32bit(size: Int, buf: ByteBuffer) {
-        repeat(size / if (channels == 2) 8 else 4) {
-            val first = buf.get().toLong()
-            val second = buf.get().toLong() shl 8
-            val third = buf.get().toLong() shl 16
-            val forth = buf.get().toLong() shl 24
-            val value = (first or second or third or forth) / Constants.THIRTY_TWO_BITS
-            if (channels == 2) {
-                buf.get()
-                buf.get()
-                buf.get()
-                buf.get()
-            }
-            handleBufferDivision(value)
-        }
-    }
-
-    /**
-     * Updates the extraction progress
-     * 
-     * Increments the progress counter and calculates the overall
-     * extraction progress as a ratio of current to expected data points.
-     */
-    private fun updateProgress() {
-        currentProgress = (sampleData.size + 1).toFloat()
-        progress = (currentProgress / safeExpectedPoints).coerceIn(0F, 1F)
-    }
-
-    /**
-     * Sends a new waveform data point and current progress to Flutter
-     *
-     * This method:
-     * 1. Adds the new RMS value to the waveform data
-     * 2. Reports the progress via the callback interface
-     * 3. Resets the sample counters for the next data point
-     * 4. Sends the current waveform data and progress to Flutter via the method channel
-     * 
-     * @param rms The calculated RMS value for this data point
-     */
-    private fun sendProgress(rms: Float) {
-        val safeProgress = progress.coerceIn(0F, 1F)
-        sampleData.add(rms)
-        extractorCallBack.onProgress(safeProgress)
-        sampleCount = 0
-        sampleSum = 0.0
-
-        val args: MutableMap<String, Any?> = HashMap()
-        args[Constants.waveformData] = sampleData
-        args[Constants.progress] = safeProgress
-        args[Constants.playerKey] = key
-        methodChannel.invokeMethod(
-            Constants.onCurrentExtractedWaveformData,
-            args
-        )
-    }
-
-    private fun sendPendingSample() {
-        if (sampleCount <= 0) return
-        if (sampleData.size >= safeExpectedPoints) {
-            sampleCount = 0
-            sampleSum = 0.0
-            return
-        }
-
-        updateProgress()
-        val rms = sqrt(sampleSum / sampleCount.coerceAtLeast(1L)).toFloat()
-        sendProgress(if (rms.isNaN() || rms.isInfinite()) 0F else rms)
-    }
-
-    private fun submitSuccess() {
-        if (isReplySubmitted) return
-
-        isReplySubmitted = true
-        progress = 1.0F
-        extractorCallBack.onProgress(progress)
-        result.success(sampleData)
-        releaseResources()
-    }
-
-    private fun submitError(message: String?, details: String) {
-        if (isReplySubmitted) return
-
-        isReplySubmitted = true
-        result.error(Constants.LOG_TAG, message, details)
-        releaseResources()
-    }
-
-    private fun releaseResources() {
-        try {
-            decoder?.stop()
-        } catch (e: Exception) {
-            Log.e(Constants.LOG_TAG, "Error stopping decoder: ${e.message}")
-        }
-
-        try {
-            decoder?.release()
-        } catch (e: Exception) {
-            Log.e(Constants.LOG_TAG, "Error releasing decoder: ${e.message}")
-        }
-        decoder = null
-
-        try {
-            extractor?.release()
-        } catch (e: Exception) {
-            Log.e(Constants.LOG_TAG, "Error releasing extractor: ${e.message}")
-        }
-        extractor = null
-        finishCount.countDown()
-    }
-
-    /**
-     * Stops the extraction process and releases resources
-     *
-     * This method:
-     * 1. Stops and releases the MediaCodec decoder
-     * 2. Releases the MediaExtractor
-     * 3. Signals completion via the countdown latch
+     * Cancels the Flutter request immediately. Amplituda has no public force
+     * cancellation API, so an already-running native decode is allowed to end
+     * and its callback is ignored.
      */
     fun stop() {
-        releaseResources()
+        cancelled.set(true)
+        submitError("Waveform extraction cancelled.", "The extraction was cancelled.")
     }
-}
 
-/**
- * Extension function to check if a buffer contains the end-of-stream flag
- * 
- * @return true if this buffer marks the end of the stream, false otherwise
- */
-fun MediaCodec.BufferInfo.isEof() = flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+    private fun resolveSource(rawPath: String): File {
+        val uri = Uri.parse(rawPath)
+        return when (uri.scheme) {
+            null -> File(rawPath)
+            "file" -> File(uri.path ?: throw IllegalArgumentException("File URI has no path."))
+            "content" -> copyContentUriToCache(uri)
+            else -> throw IllegalArgumentException("Unsupported URI scheme: ${uri.scheme}")
+        }.also { source ->
+            if (!source.isFile || !source.canRead()) {
+                throw IllegalArgumentException("Audio source is not a readable local file.")
+            }
+        }
+    }
 
-/**
- * Callback interface for reporting waveform extraction progress
- * 
- * Implementations of this interface receive progress updates during
- * the waveform extraction process.
- */
-interface ExtractorCallBack {
-    /**
-     * Called when extraction progress changes
-     * 
-     * @param value Progress value from 0.0 to 1.0, where 1.0 indicates completion
-     */
-    fun onProgress(value: Float)
+    private fun copyContentUriToCache(uri: Uri): File {
+        val file = File.createTempFile("audio_waveform_", ".source", context.cacheDir)
+        temporarySource = file
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                file.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        if (cancelled.get()) {
+                            throw InterruptedException("Waveform extraction cancelled.")
+                        }
+                        val bytesRead = input.read(buffer)
+                        if (bytesRead < 0) break
+                        output.write(buffer, 0, bytesRead)
+                    }
+                }
+            } ?: throw IllegalArgumentException("Unable to read content URI.")
+            return file
+        } catch (exception: Exception) {
+            file.delete()
+            temporarySource = null
+            throw exception
+        }
+    }
+
+    private fun readDurationMillis(source: File): Long {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(source.absolutePath)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()
+                ?.coerceAtLeast(1L)
+                ?: 1L
+        } finally {
+            retriever.release()
+        }
+    }
+
+    private fun samplesPerSecond(durationMillis: Long, targetPoints: Int): Int {
+        val durationSeconds = max(durationMillis / 1000.0, 1.0)
+        return ceil(targetPoints / durationSeconds).toInt().coerceAtLeast(1)
+    }
+
+    private fun cleanupTemporarySource() {
+        temporarySource?.let { source ->
+            source.delete()
+            temporarySource = null
+        }
+    }
+
+    private fun submitSuccess(waveform: List<Double>) {
+        if (!replySubmitted.compareAndSet(false, true)) return
+        mainHandler.post { result.success(waveform) }
+    }
+
+    private fun submitError(message: String, details: String) {
+        if (!replySubmitted.compareAndSet(false, true)) return
+        mainHandler.post { result.error(Constants.LOG_TAG, message, details) }
+    }
+
+    companion object {
+        // Amplituda 2.3.0 keeps FFmpeg decoder state in native global
+        // variables, so multiple simultaneous JNI extractions can corrupt the
+        // shared state and abort the process. Serialize all plugin requests.
+        private val extractionExecutor = Executors.newSingleThreadExecutor()
+
+        /**
+         * Aggregates compressed amplitudes into equal-duration buckets and
+         * normalizes the output to the [0, 1] range expected by Flutter.
+         */
+        internal fun aggregateAndNormalize(
+            amplitudes: List<Int>,
+            expectedPoints: Int,
+        ): List<Double> {
+            val points = expectedPoints.coerceAtLeast(1)
+            if (amplitudes.isEmpty()) return List(points) { 0.0 }
+            val waveform = ArrayList<Double>(points)
+            var maximum = 0.0
+
+            for (point in 0 until points) {
+                // A long source can have hundreds of thousands of compressed
+                // amplitudes. Keep this multiplication in Long: Int overflow
+                // produces a negative bucket start and crashes extraction.
+                val start = (point.toLong() * amplitudes.size / points).toInt()
+                val endExclusive = max(
+                    start + 1,
+                    ((point + 1L) * amplitudes.size / points).toInt(),
+                )
+                    .coerceAtMost(amplitudes.size)
+                var sum = 0.0
+                for (index in start until endExclusive) {
+                    sum += amplitudes[index].coerceAtLeast(0)
+                }
+                val value = sum / (endExclusive - start)
+                waveform.add(value)
+                maximum = max(maximum, value)
+            }
+
+            if (maximum == 0.0) return List(points) { 0.0 }
+            return waveform.map { it / maximum }
+        }
+    }
 }

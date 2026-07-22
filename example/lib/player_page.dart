@@ -2,10 +2,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 
 import 'package:audio_waveforms/audio_waveforms.dart';
-import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
@@ -31,58 +30,70 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void initState() {
     super.initState();
-    _getDir();
-
     controller = PlayerController();
-    _preparePlayer();
     playerStateSubscription = controller.onPlayerStateChanged.listen((state) {
       processingState = state;
-      print('state= $state');
     });
   }
 
-  // late Directory _appDirectory;
+  int _loadRequest = 0;
+  bool _isExtracting = false;
 
-  void _getDir() async {}
+  Future<void> _pickAudioFile() async {
+    // final sampleCount = playerWaveStyle.getSamplesForWidth(
+    //   MediaQuery.sizeOf(context).width,
+    // );
+    final selection = await FilePicker.platform.pickFiles(
+      type: FileType.audio,
+      allowMultiple: false,
+    );
+    final path = selection?.files.singleOrNull?.path;
+    if (path == null) return;
+    await _loadAudio(path);
+  }
 
-  Future<void> _preparePlayer() async {
-    await controller.pauseAllPlayers();
-
-    final appDirectory = await getApplicationDocumentsDirectory();
-
-    // String fileName = 'audio3.mp3';
-    // String fileName = 'test.opus';
-    String fileName = 'audio2.mp3';
-
-    // fileName = '.opus';
-
-    // Opening file from assets folder
-    file = File('${appDirectory.path}/$fileName');
-    final byteData = await rootBundle.load('assets/audios/$fileName');
-    final audioBytes = byteData.buffer.asUint8List();
-    await file?.writeAsBytes(audioBytes);
-    if (file?.path == null) {
-      return;
-    }
-    // Prepare player with extracting waveform if index is even.
-    await controller.preparePlayer(
-        path: file!.path, shouldExtractWaveform: false, noOfSamples: 100);
-    await controller.setFinishMode(finishMode: FinishMode.pause);
-
-    print('controller-playerKey ${controller.playerKey}');
-    // Extracting waveform separately if index is odd.
-    controller.waveformExtraction
-        .extractWaveformData(
-      path: file!.path,
-      noOfSamples:
-          playerWaveStyle.getSamplesForWidth(MediaQuery.of(context).size.width),
-    )
-        .then((waveformData) {
-      setState(() {
-        this.waveformData = waveformData;
-      });
-      print("${this.waveformData}");
+  Future<void> _loadAudio(String path) async {
+    final request = ++_loadRequest;
+    setState(() {
+      file = File(path);
+      waveformData = [];
+      _isExtracting = true;
     });
+
+    try {
+      // Supersede any in-flight extraction so its late result cannot replace
+      // the waveform for the newly selected file.
+      await controller.waveformExtraction.stopWaveformExtraction();
+    } catch (_) {
+      // There may be no active extraction for the first selected file.
+    }
+    try {
+      await controller.stopPlayer();
+    } catch (_) {
+      // The player may not have been prepared yet.
+    }
+
+    try {
+      await controller.preparePlayer(path: path, shouldExtractWaveform: false);
+      await controller.setFinishMode(finishMode: FinishMode.pause);
+      final data = await controller.waveformExtraction.extractWaveformData(
+        path: path,
+        noOfSamplesPerSecond: 10,
+      );
+      if (!mounted || request != _loadRequest) return;
+      setState(() => waveformData = data);
+    } catch (error, stackTrace) {
+      debugPrint('Unable to load audio waveform: $error\n$stackTrace');
+      if (mounted && request == _loadRequest) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('无法提取该音频的波形：$error')),
+        );
+      }
+    } finally {
+      if (mounted && request == _loadRequest) {
+        setState(() => _isExtracting = false);
+      }
+    }
   }
 
   PlayerState _processingState = PlayerState.stopped;
@@ -111,7 +122,15 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(),
+      appBar: AppBar(
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.audio_file),
+            onPressed: _pickAudioFile,
+            tooltip: '选择音频文件',
+          ),
+        ],
+      ),
       body: file?.path != null
           ? Align(
               alignment: Alignment.topCenter,
@@ -130,10 +149,15 @@ class _PlayerPageState extends State<PlayerPage> {
                       size: Size(MediaQuery.of(context).size.width, 70),
                       playerController: controller,
                       waveformData: waveformData,
-                      waveformType: WaveformType.fitWidth,
+                      waveformType: WaveformType.long,
                       playerWaveStyle: playerWaveStyle,
                     ),
                   ),
+                  if (_isExtracting)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: CircularProgressIndicator(),
+                    ),
                   // if (!controller.playerState.isStopped)
                   IconButton(
                     onPressed: () async {
@@ -203,7 +227,13 @@ class _PlayerPageState extends State<PlayerPage> {
                 ],
               ),
             )
-          : const SizedBox.shrink(),
+          : Center(
+              child: ElevatedButton.icon(
+                onPressed: _pickAudioFile,
+                icon: const Icon(Icons.audio_file),
+                label: const Text('选择音频文件'),
+              ),
+            ),
     );
   }
 }

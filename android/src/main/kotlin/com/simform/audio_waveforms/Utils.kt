@@ -1,5 +1,6 @@
 package com.simform.audio_waveforms
 
+import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
@@ -64,6 +65,7 @@ object Constants {
     const val onDidFinishPlayingAudio = "onDidFinishPlayingAudio"
     const val extractWaveformData = "extractWaveformData"
     const val noOfSamples = "noOfSamples"
+    const val noOfSamplesPerSecond = "noOfSamplesPerSecond"
     const val onCurrentExtractedWaveformData = "onCurrentExtractedWaveformData"
     const val waveformData = "waveformData"
     const val updateFrequency = "updateFrequency"
@@ -328,3 +330,6 @@ enum class Encoder {
             return this == AAC_LC || this == AAC_HE || this == AAC_ELD
         }
 }
+
+/** Returns true when this codec buffer carries the end-of-stream flag. */
+fun MediaCodec.BufferInfo.isEof() = flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0

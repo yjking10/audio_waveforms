@@ -144,7 +144,8 @@ class AudioWaveformsInterface {
 
   ///platform call to set volume
   Future<bool> setNoiseSuppressionLevel(int level, String key) async {
-    var result = await _methodChannel.invokeMethod(Constants.setNoiseSuppressionLevel, {
+    var result =
+        await _methodChannel.invokeMethod(Constants.setNoiseSuppressionLevel, {
       Constants.noiseSuppressionLevel: level,
       Constants.playerKey: key,
     });
@@ -170,8 +171,10 @@ class AudioWaveformsInterface {
 
   ///platform call to seek audio at provided position
   Future<bool> seekTo(String key, int progress) async {
-    var result = await _methodChannel.invokeMethod(Constants.seekTo,
-        {Constants.progress: progress, Constants.playerKey: key});
+    var result = await _methodChannel.invokeMethod(
+      Constants.seekTo,
+      {Constants.progress: progress, Constants.playerKey: key},
+    );
     return result ?? false;
   }
 
@@ -187,13 +190,20 @@ class AudioWaveformsInterface {
     required String key,
     required String path,
     required int noOfSamples,
+    int? noOfSamplesPerSecond,
   }) async {
-    final result =
-        await _methodChannel.invokeMethod(Constants.extractWaveformData, {
+    final arguments = <String, dynamic>{
       Constants.playerKey: key,
       Constants.path: path,
       Constants.noOfSamples: noOfSamples,
-    });
+    };
+    if (noOfSamplesPerSecond != null) {
+      arguments[Constants.noOfSamplesPerSecond] = noOfSamplesPerSecond;
+    }
+    final result = await _methodChannel.invokeMethod(
+      Constants.extractWaveformData,
+      arguments,
+    );
     return List<double>.from(result ?? []);
   }
 

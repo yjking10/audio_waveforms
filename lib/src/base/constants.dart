@@ -46,6 +46,7 @@ class Constants {
   static const String onDidFinishPlayingAudio = "onDidFinishPlayingAudio";
   static const String extractWaveformData = "extractWaveformData";
   static const String noOfSamples = "noOfSamples";
+  static const String noOfSamplesPerSecond = "noOfSamplesPerSecond";
   static const String waveformData = "waveformData";
   static const String onCurrentExtractedWaveformData =
       "onCurrentExtractedWaveformData";

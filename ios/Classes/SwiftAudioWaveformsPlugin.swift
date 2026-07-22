@@ -215,7 +215,7 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
                 extractors[playerKey] = newExtractor
                 Task {
                     await newExtractor
-                        .extractWaveform(samplesPerPixel: noOfSamples, playerKey: playerKey,
+                        .extractWaveform(samplesPerPixel: noOfSamples,
                                          onExtractionComplete: { data in
                             result(data)
                         })

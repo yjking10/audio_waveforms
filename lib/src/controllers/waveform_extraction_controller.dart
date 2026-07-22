@@ -31,13 +31,17 @@ class WaveformExtractionController {
   /// to display waveforms.
   List<double> get waveformData => _waveformData.toList();
 
-  /// A stream to get current extracted waveform data. This stream will emit
-  /// list of doubles which are waveform data point.
+  /// A stream reserved for incremental waveform extraction updates.
+  ///
+  /// Android and iOS file extraction returns waveform data only after decoding
+  /// completes, so this stream does not emit for those platforms.
   Stream<List<double>> get onCurrentExtractedWaveformData =>
       PlatformStreams.instance.onCurrentExtractedWaveformData
           .filter(_extractorKey);
 
-  /// A stream to get current progress of waveform extraction.
+  /// A stream reserved for waveform extraction progress updates.
+  ///
+  /// Android and iOS file extraction does not emit progress updates.
   Stream<double> get onExtractionProgress =>
       PlatformStreams.instance.onExtractionProgress.filter(_extractorKey);
 
@@ -82,6 +86,18 @@ class WaveformExtractionController {
     // Determine which sampling strategy to use
     final int actualNoOfSamples;
     if (noOfSamplesPerSecond != null) {
+      // A standalone WaveformExtractionController has no PlayerController
+      // with the same key. Android therefore calculates the source duration
+      // inside its extractor instead of calling getDuration(key).
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        return AudioWaveformsInterface.instance.extractWaveformData(
+          key: _extractorKey,
+          path: path,
+          noOfSamples: 1,
+          noOfSamplesPerSecond: noOfSamplesPerSecond,
+        );
+      }
+
       // Get duration to calculate actual samples
       final duration = await AudioWaveformsInterface.instance.getDuration(
         _extractorKey,

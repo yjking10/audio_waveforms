@@ -39,6 +39,7 @@ class _HomeState extends State<Home> {
     'assets/audios/audio2.mp3',
     'assets/audios/audio3.mp3',
     'assets/audios/audio4.mp3',
+    'assets/audios/test.opus',
   ];
 
   final paths = <String>[];

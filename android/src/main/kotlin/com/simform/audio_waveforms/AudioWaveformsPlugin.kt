@@ -172,7 +172,16 @@ class AudioWaveformsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     if ((call.argument(Constants.durationType) as Int?) == 0) DurationType.Current else DurationType.Max
                 val key = call.argument(Constants.playerKey) as String?
                 if (key != null) {
-                    audioPlayers[key]?.getDuration(result, type)
+                    val player = audioPlayers[key]
+                    if (player != null) {
+                        player.getDuration(result, type)
+                    } else {
+                        result.error(
+                            Constants.LOG_TAG,
+                            "Player is not prepared",
+                            "Prepare a player before requesting its duration.",
+                        )
+                    }
                 } else {
                     result.error(Constants.LOG_TAG, "Player key can't be null", "")
                 }
@@ -182,12 +191,14 @@ class AudioWaveformsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 val key = call.argument(Constants.playerKey) as String?
                 val path = call.argument(Constants.path) as String?
                 val noOfSample = call.argument(Constants.noOfSamples) as Int?
+                val noOfSamplesPerSecond = call.argument(Constants.noOfSamplesPerSecond) as Int?
                 if (key != null) {
                     createOrUpdateExtractor(
                         playerKey = key,
                         result = result,
                         path = path,
                         noOfSamples = noOfSample ?: 100,
+                        noOfSamplesPerSecond = noOfSamplesPerSecond,
                     )
                 } else {
                     result.error(Constants.LOG_TAG, "Waveform key can't be null", "")
@@ -257,6 +268,7 @@ class AudioWaveformsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun createOrUpdateExtractor(
         playerKey: String,
         noOfSamples: Int,
+        noOfSamplesPerSecond: Int?,
         path: String?,
         result: Result,
     ) {
@@ -267,16 +279,11 @@ class AudioWaveformsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         extractors[playerKey]?.stop()
         extractors[playerKey] = WaveformExtractor(
             context = applicationContext,
-            methodChannel = channel,
             expectedPoints = noOfSamples,
-            key = playerKey,
+            requestedSamplesPerSecond = noOfSamplesPerSecond,
             path = path,
             result = result,
-            extractorCallBack = object : ExtractorCallBack {
-                override fun onProgress(value: Float) {
-                }
-
-            })
+        )
         extractors[playerKey]?.startDecode()
     }
 

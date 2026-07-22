@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../audio_waveforms.dart';
@@ -205,6 +206,16 @@ class _AudioFileWaveformsState extends State<AudioFileWaveforms>
     playerController.removeListener(_addWaveformDataFromController);
     _growingWaveController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant AudioFileWaveforms oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // `waveformData` is commonly populated asynchronously. Keep the internal
+    // painter data in sync when the parent rebuilds with the completed result.
+    if (!listEquals(oldWidget.waveformData, widget.waveformData)) {
+      _addWaveformData(widget.waveformData);
+    }
   }
 
   double _audioProgress = 0.0;

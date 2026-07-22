@@ -76,25 +76,23 @@ class _WaveBubbleState extends State<WaveBubble> {
   void initState() {
     super.initState();
     controller = PlayerController();
-    _preparePlayer();
+    unawaited(_preparePlayer());
     playerStateSubscription = controller.onPlayerStateChanged.listen((_) {
-      setState(() {});
+      if (mounted) setState(() {});
     });
   }
 
-  void _preparePlayer() async {
-    controller.preparePlayer(
-      path: widget.path,
-      shouldExtractWaveform: widget.isSender,
-    );
-    if (!widget.isSender) {
-      controller.waveformExtraction
-          .extractWaveformData(
-            path: widget.path,
-            noOfSamples:
-                playerWaveStyle.getSamplesForWidth(widget.width ?? 200),
-          )
-          .then((waveformData) => debugPrint(waveformData.toString()));
+  Future<void> _preparePlayer() async {
+    try {
+      await controller.preparePlayer(
+        path: widget.path,
+        // The controller stores the final result and notifies
+        // AudioFileWaveforms when it is ready.
+        shouldExtractWaveform: true,
+        noOfSamples: playerWaveStyle.getSamplesForWidth(widget.width ?? 200),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Unable to prepare waveform: $error\n$stackTrace');
     }
   }
 
@@ -145,8 +143,10 @@ class _WaveBubbleState extends State<WaveBubble> {
             AudioFileWaveforms(
               size: Size(MediaQuery.of(context).size.width / 2, 70),
               playerController: controller,
-              waveformType:
-                  widget.isSender ? WaveformType.long : WaveformType.fitWidth,
+              // Android/iOS now return waveform data once extraction completes;
+              // no incremental waveform event is emitted.
+              continuousWaveform: false,
+              waveformType: WaveformType.fitWidth,
               playerWaveStyle: playerWaveStyle,
             ),
             if (widget.isSender) const SizedBox(width: 10),

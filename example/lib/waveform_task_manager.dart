@@ -57,9 +57,9 @@ class WaveformSyncManager {
 
     try {
       final List<double> wvData = await waveformExtraction.extractWaveformData(
-        path: task.path,
-        noOfSamples: 100, // 建议固定采样数以便数据库存储一致性
-      );
+          path: task.path,
+          // noOfSamples: 100, // 建议固定采样数以便数据库存储一致性
+          noOfSamplesPerSecond: 10);
 
       if (wvData.isNotEmpty) {
         // 2. 完成后更新到数据库
@@ -74,7 +74,6 @@ class WaveformSyncManager {
     } catch (e) {
       print("波形同步失败: ${task.path}, 错误: $e");
     } finally {
-
       // await waveformExtraction.stopWaveformExtraction();
       _processingPaths.remove(task.path);
       _isWorking = false;

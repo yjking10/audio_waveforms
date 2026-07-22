@@ -97,7 +97,6 @@ public class WaveformExtractor {
         samplesPerPixel: Int?,
         offset: Int? = 0,
         length: UInt? = nil,
-        playerKey: String,
         onExtractionComplete: ([Float]?) -> Void
     ) async -> Void {
         // Use decoder if available, otherwise use audioFile
@@ -106,7 +105,6 @@ public class WaveformExtractor {
                 samplesPerPixel: samplesPerPixel,
                 offset: offset,
                 length: length,
-                playerKey: playerKey,
                 onExtractionComplete: onExtractionComplete
             )
             return
@@ -181,13 +179,6 @@ public class WaveformExtractor {
                 )
             }
             
-            let progress = Float(i - startIndex + 1) / Float(endIndex - startIndex)
-            await sendWaveformDataToFlutter(
-                waveformStorage: waveformStorage,
-                progress: progress,
-                playerKey: playerKey
-            )
-            
             startFrame += AVAudioFramePosition(framesPerBuffer)
             if startFrame + AVAudioFramePosition(framesPerBuffer) > totalFrames {
                 framesPerBuffer = totalFrames - AVAudioFrameCount(startFrame)
@@ -223,26 +214,6 @@ public class WaveformExtractor {
         abortGetWaveformData = true
     }
 
-    private func sendWaveformDataToFlutter(
-        waveformStorage: WaveformStorage,
-        progress: Float,
-        playerKey: String
-    ) async {
-        let waveformData = await waveformStorage.getData()
-        let meanData = getChannelMean(data: waveformData)
-
-        DispatchQueue.main.async {
-            self.flutterChannel.invokeMethod(
-                Constants.onCurrentExtractedWaveformData,
-                arguments: [
-                    Constants.waveformData: meanData,
-                    Constants.progress: progress,
-                    Constants.playerKey: playerKey
-                ]
-            )
-        }
-    }
-
     private func sendErrorToFlutter(message: String, details: String? = nil) {
         DispatchQueue.main.async {
             self.result(
@@ -260,7 +231,6 @@ public class WaveformExtractor {
         samplesPerPixel: Int?,
         offset: Int? = 0,
         length: UInt? = nil,
-        playerKey: String,
         onExtractionComplete: ([Float]?) -> Void
     ) async -> Void {
         guard let decoder = audioDecoder,
@@ -337,13 +307,6 @@ public class WaveformExtractor {
                     channel: channel, index: i, value: rmsValue
                 )
             }
-
-            let progress = Float(i - startIndex + 1) / Float(endIndex - startIndex)
-            await sendWaveformDataToFlutter(
-                waveformStorage: waveformStorage,
-                progress: progress,
-                playerKey: playerKey
-            )
 
             startFrame += AVAudioFramePosition(framesPerBuffer)
             if startFrame + AVAudioFramePosition(framesPerBuffer) > Int64(totalFrames) {

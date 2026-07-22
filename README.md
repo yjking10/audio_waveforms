@@ -22,6 +22,25 @@ _Check out other amazing open-source [Flutter libraries](https://simform-flutter
 - **Customization**: Style waveforms with colors, gradients, and various appearance options
 - **Waveform Extraction**: Extract and save waveform data for better performance
 
+## Long audio files
+
+For a full-duration overview rendered with `WaveformType.fitWidth`, pass a
+fixed `noOfSamples` calculated from the rendered width instead of using
+`noOfSamplesPerSecond`. For example:
+
+```dart
+final samples = playerWaveStyle.getSamplesForWidth(width);
+final waveformData = await waveformExtraction.extractWaveformData(
+  path: path,
+  noOfSamples: samples,
+);
+```
+
+The Android and iOS extractors still decode the complete file so every bar
+represents its corresponding time range, but return the waveform only after
+extraction finishes. This avoids repeatedly serializing the growing waveform
+data set.
+
 ## Documentation
 
 Visit our [documentation](https://simform-flutter-packages.web.app/audioWaveForm) site for all implementation details, usage instructions, code examples, and advanced features.
