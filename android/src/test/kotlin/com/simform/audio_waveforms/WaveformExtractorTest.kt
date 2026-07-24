@@ -6,13 +6,23 @@ import org.junit.Test
 
 class WaveformExtractorTest {
     @Test
-    fun aggregatesIntoEqualDurationBucketsAndNormalizes() {
+    fun aggregatesPeakValuesIntoEqualDurationBucketsAndNormalizes() {
         val waveform = WaveformExtractor.aggregateAndNormalize(
             amplitudes = listOf(0, 10, 20, 30),
             expectedPoints = 2,
         )
 
-        assertEquals(listOf(0.2, 1.0), waveform)
+        assertEquals(listOf(10.0 / 30.0, 1.0), waveform)
+    }
+
+    @Test
+    fun aggregationPreservesTransientPeakInsteadOfAveragingItAway() {
+        val waveform = WaveformExtractor.aggregateAndNormalize(
+            amplitudes = listOf(1, 100, 1, 50),
+            expectedPoints = 2,
+        )
+
+        assertEquals(listOf(1.0, 0.5), waveform)
     }
 
     @Test

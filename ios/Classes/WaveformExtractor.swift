@@ -2,7 +2,7 @@ import Accelerate
 import AVFoundation
 import SFBAudioEngine
 
-/// Decodes an entire local audio source into a fixed number of RMS values.
+/// Decodes an entire local audio source into fixed peak-amplitude values.
 ///
 /// This type deliberately has no MethodChannel dependency. The plugin owns the
 /// one-shot Flutter reply, which prevents an extraction error from leaving the
@@ -226,7 +226,7 @@ public final class WaveformExtractor {
     }
 
     /// Reads at most 65k PCM frames at a time. This keeps memory flat for long
-    /// audio while preserving exact RMS for every time bucket.
+    /// audio while preserving the peak amplitude for every time bucket.
     private func extract(
         format: AVAudioFormat,
         totalFrames: Int64,
@@ -252,8 +252,7 @@ public final class WaveformExtractor {
 
             let bucketFrames = min(framesPerBucket, totalFrames - decodedFrames)
             var remainingFrames = bucketFrames
-            var energy: Float = 0
-            var measuredFrames: Int64 = 0
+            var peak: Float = 0
 
             while remainingFrames > 0 {
                 try throwIfCancelled()
@@ -267,23 +266,21 @@ public final class WaveformExtractor {
                 }
 
                 for channel in 0..<channels {
-                    var channelEnergy: Float = 0
-                    vDSP_svesq(channelData[channel], 1, &channelEnergy, vDSP_Length(frameLength))
-                    energy += channelEnergy
+                    var channelPeak: Float = 0
+                    vDSP_maxmgv(channelData[channel], 1, &channelPeak, vDSP_Length(frameLength))
+                    peak = max(peak, channelPeak)
                 }
-                measuredFrames += frameLength * Int64(channels)
                 decodedFrames += frameLength
                 remainingFrames -= frameLength
             }
 
-            if measuredFrames > 0 {
-                values[index] = sqrtf(energy / Float(measuredFrames))
-            }
+            values[index] = peak
             // A decoder reaching EOF early should end extraction, but still
             // return the requested fixed-size overview with zero tail buckets.
             if remainingFrames > 0 { break }
         }
-        return values
+        guard let maximum = values.max(), maximum > 0 else { return values }
+        return values.map { $0 / maximum }
     }
 
     private func throwIfCancelled() throws {

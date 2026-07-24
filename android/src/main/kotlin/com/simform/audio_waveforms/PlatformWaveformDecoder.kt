@@ -7,11 +7,11 @@ import android.media.MediaFormat
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.sqrt
 
 /**
- * Compatibility decoder used only when Amplituda cannot decode a stream.
+ * PCM waveform decoder that produces a full-detail, fixed-width overview.
  *
  * It still produces a fixed-width, full-duration overview and never sends
  * intermediate samples over the method channel. Using presentation timestamps
@@ -25,8 +25,7 @@ internal class PlatformWaveformDecoder(
 ) {
     private val points = expectedPoints.coerceAtLeast(1)
     private val durationUs = (durationMillis.coerceAtLeast(1L) * 1_000L)
-    private val squareSums = DoubleArray(points)
-    private val sampleCounts = LongArray(points)
+    private val peaks = DoubleArray(points)
 
     fun decode(): List<Double> {
         val extractor = MediaExtractor()
@@ -150,24 +149,19 @@ internal class PlatformWaveformDecoder(
                     else -> pcm.short.toDouble() / 32_768.0
                 }
                 if (value.isFinite()) {
-                    squareSums[bucket] += value * value
-                    sampleCounts[bucket]++
+                    peaks[bucket] = max(peaks[bucket], abs(value))
                 }
             }
         }
     }
 
     private fun finishWaveform(): List<Double> {
-        val waveform = DoubleArray(points)
         var maximum = 0.0
-        for (index in waveform.indices) {
-            if (sampleCounts[index] > 0) {
-                waveform[index] = sqrt(squareSums[index] / sampleCounts[index])
-                maximum = max(maximum, waveform[index])
-            }
+        for (peak in peaks) {
+            maximum = max(maximum, peak)
         }
         return if (maximum == 0.0) List(points) { 0.0 }
-        else waveform.map { it / maximum }
+        else peaks.map { it / maximum }
     }
 
     private fun ensureNotCancelled() {

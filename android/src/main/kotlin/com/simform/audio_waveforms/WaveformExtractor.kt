@@ -14,11 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.ceil
 import kotlin.math.max
 
-/**
- * Extracts a fixed-width overview waveform with Amplituda's native FFmpeg
- * decoder. The entire source is processed, but native compression limits the
- * intermediate amplitude data to at least one sample per second.
- */
+/** Extracts a fixed-width peak waveform from the entire local audio source. */
 class WaveformExtractor(
     private val path: String,
     expectedPoints: Int,
@@ -54,56 +50,29 @@ class WaveformExtractor(
                 val samplesPerSecond = requestedSamplesPerSecond
                     ?.coerceAtLeast(1)
                     ?: samplesPerSecond(durationMillis, targetPoints)
-                val compress = Compress.withParams(Compress.AVERAGE, samplesPerSecond)
-
-                Amplituda(context)
-                    .processAudio(source, compress)
-                    .get(
-                        { amplitudaResult ->
-                            try {
-                                if (!cancelled.get()) {
-                                    submitSuccess(
-                                        aggregateAndNormalize(
-                                            amplitudaResult.amplitudesAsList(),
-                                            targetPoints,
-                                        ),
-                                    )
-                                }
-                            } finally {
-                                cleanupTemporarySource()
-                            }
-                        },
-                        { exception ->
-                            // Amplituda's bundled FFmpeg decoder rejects some otherwise
-                            // valid streams (for example, it can fail while submitting an
-                            // AAC packet). Do not expose that implementation limitation as
-                            // a Flutter error: fall back to Android's codec for this source.
-                            extractionExecutor.execute {
-                                try {
-                                    if (!cancelled.get()) {
-                                        val waveform = PlatformWaveformDecoder(
-                                            source = source,
-                                            expectedPoints = targetPoints,
-                                            durationMillis = durationMillis,
-                                            isCancelled = cancelled::get,
-                                        ).decode()
-                                        if (!cancelled.get()) submitSuccess(waveform)
-                                    }
-                                } catch (fallbackException: Exception) {
-                                    if (!cancelled.get()) {
-                                        submitError(
-                                            fallbackException.message
-                                                ?: exception.message
-                                                ?: "Failed to extract waveform data.",
-                                            "Both the fast and Android compatibility decoders could not process the audio source.",
-                                        )
-                                    }
-                                } finally {
-                                    cleanupTemporarySource()
-                                }
-                            }
-                        },
+                try {
+                    // MediaCodec yields PCM with timestamps, so high-resolution buckets
+                    // retain short transients instead of Amplituda's averaged envelope.
+                    val waveform = PlatformWaveformDecoder(
+                        source = source,
+                        expectedPoints = targetPoints,
+                        durationMillis = durationMillis,
+                        isCancelled = cancelled::get,
+                    ).decode()
+                    if (!cancelled.get()) submitSuccess(waveform)
+                    cleanupTemporarySource()
+                } catch (platformException: Exception) {
+                    if (cancelled.get()) {
+                        cleanupTemporarySource()
+                        return@execute
+                    }
+                    decodeWithAmplitudaFallback(
+                        source = source,
+                        targetPoints = targetPoints,
+                        samplesPerSecond = samplesPerSecond,
+                        platformException = platformException,
                     )
+                }
             } catch (exception: Exception) {
                 cleanupTemporarySource()
                 if (!cancelled.get()) {
@@ -183,6 +152,49 @@ class WaveformExtractor(
         return ceil(targetPoints / durationSeconds).toInt().coerceAtLeast(1)
     }
 
+    private fun decodeWithAmplitudaFallback(
+        source: File,
+        targetPoints: Int,
+        samplesPerSecond: Int,
+        platformException: Exception,
+    ) {
+        // This is a compatibility fallback only. PEAK avoids flattening
+        // transients when its lower-resolution output must be downsampled.
+        val compress = Compress.withParams(Compress.PEAK, samplesPerSecond)
+        Amplituda(context)
+            .processAudio(source, compress)
+            .get(
+                { amplitudaResult ->
+                    try {
+                        if (!cancelled.get()) {
+                            submitSuccess(
+                                aggregateAndNormalize(
+                                    amplitudaResult.amplitudesAsList(),
+                                    targetPoints,
+                                ),
+                            )
+                        }
+                    } finally {
+                        cleanupTemporarySource()
+                    }
+                },
+                { amplitudaException ->
+                    try {
+                        if (!cancelled.get()) {
+                            submitError(
+                                amplitudaException.message
+                                    ?: platformException.message
+                                    ?: "Failed to extract waveform data.",
+                                "Both the Android PCM and Amplituda compatibility decoders could not process the audio source.",
+                            )
+                        }
+                    } finally {
+                        cleanupTemporarySource()
+                    }
+                },
+            )
+    }
+
     private fun cleanupTemporarySource() {
         temporarySource?.let { source ->
             source.delete()
@@ -207,7 +219,7 @@ class WaveformExtractor(
         private val extractionExecutor = Executors.newSingleThreadExecutor()
 
         /**
-         * Aggregates compressed amplitudes into equal-duration buckets and
+         * Aggregates compressed amplitudes into equal-duration peak buckets and
          * normalizes the output to the [0, 1] range expected by Flutter.
          */
         internal fun aggregateAndNormalize(
@@ -229,13 +241,12 @@ class WaveformExtractor(
                     ((point + 1L) * amplitudes.size / points).toInt(),
                 )
                     .coerceAtMost(amplitudes.size)
-                var sum = 0.0
+                var peak = 0.0
                 for (index in start until endExclusive) {
-                    sum += amplitudes[index].coerceAtLeast(0)
+                    peak = max(peak, amplitudes[index].coerceAtLeast(0).toDouble())
                 }
-                val value = sum / (endExclusive - start)
-                waveform.add(value)
-                maximum = max(maximum, value)
+                waveform.add(peak)
+                maximum = max(maximum, peak)
             }
 
             if (maximum == 0.0) return List(points) { 0.0 }

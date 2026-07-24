@@ -121,7 +121,8 @@ class PlayerController extends ChangeNotifier {
   /// [noOfSamples] indicates no of extracted data points. This will determine
   /// number of bars in the waveform.
   ///
-  /// Defaults to 100 if both [noOfSamples] and [noOfSamplesPerSecond] are null.
+  /// Defaults to 100 samples per second if both [noOfSamples] and
+  /// [noOfSamplesPerSecond] are null.
   ///
   /// [noOfSamplesPerSecond] can be used as an alternative to [noOfSamples] to specify
   /// the number of samples per second of audio. The actual [noOfSamples] will
@@ -131,7 +132,7 @@ class PlayerController extends ChangeNotifier {
   /// **Important**: Provide only ONE of [noOfSamples] OR [noOfSamplesPerSecond], not both.
   /// - To use fixed sample count: provide only [noOfSamples]
   /// - To use samples per second: provide only [noOfSamplesPerSecond]
-  /// - If both are null, defaults to [noOfSamples] = 100
+  /// - If both are null, defaults to [noOfSamplesPerSecond] = 100
   Future<void> preparePlayer({
     required String path,
     double? volume,
@@ -160,26 +161,11 @@ class PlayerController extends ChangeNotifier {
     }
 
     if (shouldExtractWaveform) {
-      // Determine which sampling strategy to use
-      final int actualNoOfSamples;
-      if (noOfSamplesPerSecond != null) {
-        // Use dynamic calculation based on duration
-        if (_maxDuration > 0) {
-          actualNoOfSamples =
-              (noOfSamplesPerSecond * (_maxDuration / 1000)).round();
-        } else {
-          actualNoOfSamples =
-              noOfSamplesPerSecond; // Fallback if duration unavailable
-        }
-      } else {
-        // Use fixed sample count (default to 100 if not provided)
-        actualNoOfSamples = noOfSamples ?? 100;
-      }
-
       waveformExtraction
           .extractWaveformData(
         path: path,
-        noOfSamples: actualNoOfSamples,
+        noOfSamples: noOfSamples,
+        noOfSamplesPerSecond: noOfSamplesPerSecond,
       )
           .then(
         (value) {

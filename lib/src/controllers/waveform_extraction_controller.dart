@@ -49,7 +49,7 @@ class WaveformExtractionController {
   /// [noOfSamples] indicates number of extracted data points. This will
   /// determine number of bars in the waveform.
   ///
-  /// This function will decode whole audio file and will calculate RMS
+  /// This function will decode the whole audio file and calculate a peak
   /// according to provided number of samples. So it may take a while to fully
   /// decode audio file, specifically on android.
   ///
@@ -60,7 +60,8 @@ class WaveformExtractionController {
   /// Providing less number if sample doesn't make a difference because it
   /// still have to decode whole file.
   ///
-  /// [noOfSamples] defaults to 100 if both [noOfSamples] and [noOfSamplesPerSecond] are null.
+  /// Defaults to 100 samples per second if both [noOfSamples] and
+  /// [noOfSamplesPerSecond] are null.
   ///
   /// [noOfSamplesPerSecond] can be used as an alternative to [noOfSamples] to specify
   /// the number of samples per second of audio. The actual [noOfSamples] will
@@ -70,7 +71,7 @@ class WaveformExtractionController {
   /// **Important**: Provide only ONE of [noOfSamples] OR [noOfSamplesPerSecond], not both.
   /// - To use fixed sample count: provide only [noOfSamples]
   /// - To use samples per second: provide only [noOfSamplesPerSecond]
-  /// - If both are null, defaults to [noOfSamples] = 100
+  /// - If both are null, defaults to [noOfSamplesPerSecond] = 100
   Future<List<double>> extractWaveformData({
     required String path,
     int? noOfSamples,
@@ -85,7 +86,9 @@ class WaveformExtractionController {
 
     // Determine which sampling strategy to use
     final int actualNoOfSamples;
-    if (noOfSamplesPerSecond != null) {
+    final requestedSamplesPerSecond =
+        noOfSamplesPerSecond ?? (noOfSamples == null ? 100 : null);
+    if (requestedSamplesPerSecond != null) {
       // A standalone WaveformExtractionController has no PlayerController
       // with the same key. Ask the native extractor to calculate the source
       // duration instead of calling getDuration(key), which has no result for
@@ -96,7 +99,7 @@ class WaveformExtractionController {
           key: _extractorKey,
           path: path,
           noOfSamples: 1,
-          noOfSamplesPerSecond: noOfSamplesPerSecond,
+          noOfSamplesPerSecond: requestedSamplesPerSecond,
         );
       }
 
@@ -107,14 +110,14 @@ class WaveformExtractionController {
       );
 
       if (duration != null && duration > 0) {
-        actualNoOfSamples = (noOfSamplesPerSecond * (duration / 1000)).round();
+        actualNoOfSamples =
+            (requestedSamplesPerSecond * (duration / 1000)).round();
       } else {
         // Fallback if duration unavailable
-        actualNoOfSamples = noOfSamplesPerSecond;
+        actualNoOfSamples = requestedSamplesPerSecond;
       }
     } else {
-      // Use fixed sample count (default to 100 if not provided)
-      actualNoOfSamples = noOfSamples ?? 100;
+      actualNoOfSamples = noOfSamples!;
     }
 
     return await AudioWaveformsInterface.instance.extractWaveformData(
