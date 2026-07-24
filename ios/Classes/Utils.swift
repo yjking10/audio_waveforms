@@ -57,6 +57,7 @@ struct Constants {
     static let onDidFinishPlayingAudio = "onDidFinishPlayingAudio"
     static let extractWaveformData = "extractWaveformData"
     static let noOfSamples = "noOfSamples"
+    static let noOfSamplesPerSecond = "noOfSamplesPerSecond"
     static let onCurrentExtractedWaveformData = "onCurrentExtractedWaveformData"
     static let waveformData = "waveformData"
     static let onExtractionProgressUpdate = "onExtractionProgressUpdate"

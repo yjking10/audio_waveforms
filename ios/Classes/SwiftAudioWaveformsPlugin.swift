@@ -137,18 +137,18 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
             case Constants.getDuration:
                 let type = args?[Constants.durationType] as? Int
                 let key = args?[Constants.playerKey] as? String
-                if(key != nil){
+                if let key = key, let player = audioPlayers[key] {
                     do{
                         if(type == 0){
-                            try audioPlayers[key!]?.getDuration(DurationType.Current,result)
+                            try player.getDuration(DurationType.Current,result)
                         } else {
-                            try audioPlayers[key!]?.getDuration( DurationType.Max,result)
+                            try player.getDuration(DurationType.Max,result)
                         }
                     } catch{
                         result(FlutterError(code: "", message: "Failed to get duration", details: nil))
                     }
                 } else {
-                    result(FlutterError(code: Constants.audioWaveforms, message: "Can not get duration", details: "Player key is null"))
+                    result(FlutterError(code: Constants.audioWaveforms, message: "Can not get duration", details: "Player has not been prepared"))
                 }
             case Constants.stopAllPlayers:
                 for (playerKey,_) in audioPlayers {
@@ -169,11 +169,13 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
                 }
                 let path = args?[Constants.path] as? String
                 let noOfSamples = args?[Constants.noOfSamples] as? Int
+                let noOfSamplesPerSecond = args?[Constants.noOfSamplesPerSecond] as? Int
                 createOrUpdateExtractor(
                     playerKey: key,
                     result: result,
                     path: path,
-                    noOfSamples: noOfSamples
+                    noOfSamples: noOfSamples,
+                    noOfSamplesPerSecond: noOfSamplesPerSecond
                 )
             case Constants.stopExtraction:
                 guard let key = args?[Constants.playerKey] as? String else {
@@ -202,26 +204,60 @@ public class SwiftAudioWaveformsPlugin: NSObject, FlutterPlugin {
         }
     }
     
-    func createOrUpdateExtractor(playerKey: String, result: @escaping FlutterResult,path: String?, noOfSamples: Int?) {
+    func createOrUpdateExtractor(
+        playerKey: String,
+        result: @escaping FlutterResult,
+        path: String?,
+        noOfSamples: Int?,
+        noOfSamplesPerSecond: Int?
+    ) {
         if(!(path ?? "").isEmpty) {
             do {
-                let audioUrl = URL(string: path!)
-                if(audioUrl == nil){
-                    result(FlutterError(code: Constants.audioWaveforms, message: "Failed to initialise Url from provided audio file", details: "Provide an absolute local path, file:// URL, or http(s) URL"))
-                    return
+                let audioUrl: URL
+                if let url = URL(string: path!), url.scheme != nil {
+                    audioUrl = url
+                } else {
+                    // Callers sometimes provide a URL-encoded POSIX path
+                    // (for example `Steve%20Jobs.mp3`) instead of a file://
+                    // URL. FileManager treats `%20` literally, so decode it
+                    // before constructing the local file URL.
+                    let localPath = path!.removingPercentEncoding ?? path!
+                    audioUrl = URL(fileURLWithPath: localPath)
                 }
                 extractors[playerKey]?.cancel()
-                let newExtractor = try WaveformExtractor(url: audioUrl!, flutterResult: result, channel: flutterChannel)
+                let newExtractor = try WaveformExtractor(url: audioUrl)
                 extractors[playerKey] = newExtractor
-                Task {
-                    await newExtractor
-                        .extractWaveform(samplesPerPixel: noOfSamples,
-                                         onExtractionComplete: { data in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        let data = try newExtractor.extractWaveform(
+                            samplesPerPixel: noOfSamples,
+                            samplesPerSecond: noOfSamplesPerSecond
+                        )
+                        DispatchQueue.main.async { [weak self] in
+                            if self?.extractors[playerKey] === newExtractor {
+                                self?.extractors[playerKey] = nil
+                            }
                             result(data)
-                        })
+                        }
+                    } catch {
+                        DispatchQueue.main.async { [weak self] in
+                            if self?.extractors[playerKey] === newExtractor {
+                                self?.extractors[playerKey] = nil
+                            }
+                            result(FlutterError(
+                                code: Constants.audioWaveforms,
+                                message: "Failed to extract waveform",
+                                details: error.localizedDescription
+                            ))
+                        }
+                    }
                 }
             } catch {
-                result(FlutterError(code: Constants.audioWaveforms, message: "Failed to decode audio file", details: nil))
+                result(FlutterError(
+                    code: Constants.audioWaveforms,
+                    message: "Failed to decode audio file",
+                    details: error.localizedDescription
+                ))
             }
         } else {
             result(FlutterError(code: Constants.audioWaveforms, message: "Audio file path can't be empty or null", details: nil))

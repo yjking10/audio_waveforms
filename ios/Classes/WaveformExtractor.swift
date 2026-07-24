@@ -2,337 +2,294 @@ import Accelerate
 import AVFoundation
 import SFBAudioEngine
 
-public class WaveformExtractor {
+/// Decodes an entire local audio source into a fixed number of RMS values.
+///
+/// This type deliberately has no MethodChannel dependency. The plugin owns the
+/// one-shot Flutter reply, which prevents an extraction error from leaving the
+/// Dart Future pending.
+public final class WaveformExtractor {
 
-    public private(set) var audioFile: AVAudioFile?
-    private var audioDecoder: AudioDecoder?
-    private var isUsingDecoder: Bool = false
-    private var decoderFormat: AVAudioFormat?
-    private var decoderLength: AVAudioFramePosition = 0
-    private var result: FlutterResult
-    var flutterChannel: FlutterMethodChannel
-    private var waveformData = Array<Float>()
-    var progress: Float = 0.0
-    var channelCount: Int = 1
-    private var currentProgress: Float = 0.0
-    private let abortWaveformDataQueue = DispatchQueue(
-        label: "WaveformExtractor",
-        attributes: .concurrent
-    )
+    private enum ExtractionError: LocalizedError {
+        case invalidSource(String)
+        case invalidFormat
+        case cancelled
 
-    private var _abortGetWaveformData: Bool = false
-
-    public var abortGetWaveformData: Bool {
-        get { _abortGetWaveformData }
-        set {
-            abortWaveformDataQueue.async(flags: .barrier) {
-                self._abortGetWaveformData = newValue
+        var errorDescription: String? {
+            switch self {
+            case .invalidSource(let message): return message
+            case .invalidFormat: return "Audio source has no readable PCM channels."
+            case .cancelled: return "Waveform extraction was cancelled."
             }
         }
     }
-    public init(url: URL, flutterResult: @escaping FlutterResult, channel: FlutterMethodChannel) throws {
-        result = flutterResult
-        self.flutterChannel = channel
 
-        let ext = url.pathExtension.lowercased()
+    private var audioFile: AVAudioFile?
+    private var audioDecoder: AudioDecoder?
+    private let sourceURL: URL
+    private let usesDecoder: Bool
+    private let decoderFormat: AVAudioFormat?
+    private let decoderLength: AVAudioFramePosition
 
-        // AVAudioFile 原生不支持的格式，直接使用 AudioDecoder
-        let needsAudioDecoder = ["opus", "flac", "ape", "wv", "tta", "mpc", "dsf", "dff", "shn", "spx"]
+    private let cancellationLock = NSLock()
+    private var isCancelled = false
 
-        if needsAudioDecoder.contains(ext) {
-            // 直接使用 SFBAudioEngine AudioDecoder
+    public init(url: URL) throws {
+        guard url.isFileURL else {
+            throw ExtractionError.invalidSource(
+                "Only local file URLs are supported for waveform extraction: \(url.absoluteString)"
+            )
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw ExtractionError.invalidSource("Audio file does not exist: \(url.path)")
+        }
+        sourceURL = url
+
+        let extensionName = url.pathExtension.lowercased()
+        let decoderOnlyExtensions: Set<String> = [
+            "opus", "flac", "ape", "wv", "tta", "mpc", "dsf", "dff", "shn", "spx"
+        ]
+
+        if decoderOnlyExtensions.contains(extensionName) {
+            let decoder = try AudioDecoder(url: url)
+            try decoder.open()
+            audioDecoder = decoder
+            decoderFormat = decoder.processingFormat
+            decoderLength = decoder.length
+            usesDecoder = true
+            return
+        }
+
+        do {
+            audioFile = try AVAudioFile(forReading: url)
+            decoderFormat = nil
+            decoderLength = 0
+            usesDecoder = false
+        } catch {
+            // Some containers supported by SFBAudioEngine are not accepted by
+            // AVAudioFile, so use it as a general fallback rather than relying
+            // on a private AVFoundation error code.
+            let avAudioFileError = error
             do {
-                audioDecoder = try AudioDecoder(url: url)
-                try audioDecoder?.open()
-                decoderFormat = audioDecoder?.processingFormat
-                decoderLength = audioDecoder?.length ?? 0
-                isUsingDecoder = true
+                let decoder = try AudioDecoder(url: url)
+                try decoder.open()
+                audioDecoder = decoder
+                decoderFormat = decoder.processingFormat
+                decoderLength = decoder.length
+                usesDecoder = true
             } catch {
-                audioFile = nil
-                audioDecoder = nil
-                result(FlutterError(code: Constants.audioWaveforms,
-                                  message: error.localizedDescription,
-                                  details: "Couldn't initialise AudioDecoder from \(url.absoluteString)"))
-            }
-        } else {
-            // 系统原生格式：优先使用 AVAudioFile，失败后回退到 AudioDecoder
-            do {
-                audioFile = try AVAudioFile(forReading: url)
-                isUsingDecoder = false
-            } catch let avError as NSError {
-                if avError.code == 1954115647 {
-                    NSLog("AVAudioFile failed (type unsupported), using AudioDecoder for: \(url.path)")
-                    do {
-                        audioDecoder = try AudioDecoder(url: url)
-                        try audioDecoder?.open()
-                        decoderFormat = audioDecoder?.processingFormat
-                        decoderLength = audioDecoder?.length ?? 0
-                        isUsingDecoder = true
-                    } catch {
-                        audioFile = nil
-                        audioDecoder = nil
-                        result(FlutterError(code: Constants.audioWaveforms,
-                                          message: error.localizedDescription,
-                                          details: "Couldn't initialise audio decoder from \(url.absoluteString)"))
-                    }
-                } else {
-                    audioFile = nil
-                    result(FlutterError(code: Constants.audioWaveforms,
-                                      message: avError.localizedDescription,
-                                      details: "Couldn't initialise AVAudioFile from \(url.absoluteString)"))
-                }
+                throw ExtractionError.invalidSource(
+                    "AVAudioFile could not open the source: \(avAudioFileError.localizedDescription). " +
+                    "SFBAudioEngine fallback also failed: \(error.localizedDescription)"
+                )
             }
         }
     }
 
     deinit {
-        audioFile = nil
-        if let decoder = audioDecoder {
-            try? decoder.close()
-            audioDecoder = nil
-        }
+        try? audioDecoder?.close()
+    }
+
+    public func cancel() {
+        cancellationLock.lock()
+        isCancelled = true
+        cancellationLock.unlock()
     }
 
     public func extractWaveform(
         samplesPerPixel: Int?,
-        offset: Int? = 0,
-        length: UInt? = nil,
-        onExtractionComplete: ([Float]?) -> Void
-    ) async -> Void {
-        // Use decoder if available, otherwise use audioFile
-        if isUsingDecoder {
-            await extractWaveformWithDecoder(
-                samplesPerPixel: samplesPerPixel,
-                offset: offset,
-                length: length,
-                onExtractionComplete: onExtractionComplete
-            )
-            return
-        }
-
-        guard let audioFile = audioFile else { return }
-
-        /// Prevent division by zero, + minimum resolution
-        let samplesPerPixel = max(1, samplesPerPixel ?? 100)
-        let currentFrame = audioFile.framePosition
-        let totalFrames = AVAudioFrameCount(audioFile.length)
-        var framesPerBuffer = totalFrames / AVAudioFrameCount(samplesPerPixel)
-        
-        guard let rmsBuffer = AVAudioPCMBuffer(
-            pcmFormat: audioFile.processingFormat,
-            frameCapacity: framesPerBuffer
-        ) else { return }
-        
-        let channelCount = Int(audioFile.processingFormat.channelCount)
-        let waveformStorage = WaveformStorage(
-            channelCount: channelCount,
-            size: samplesPerPixel
-        )
-        
-        let startIndex = max(
-            0, offset ?? Int(currentFrame / Int64(framesPerBuffer))
-        )
-        let endIndex = min(
-            samplesPerPixel, startIndex + (length.map { Int($0) } ?? samplesPerPixel)
-        )
-        
-        if startIndex > endIndex {
-            sendErrorToFlutter(
-                message: "Offset is larger than total length.",
-                details: "Please select less number of samples"
-            )
-            return
-        }
-        
-        var startFrame: AVAudioFramePosition = offset == nil
-        ? currentFrame
-        : Int64(startIndex * Int(framesPerBuffer))
-        
-        for i in startIndex..<endIndex {
-            if abortGetWaveformData {
-                audioFile.framePosition = currentFrame
-                abortGetWaveformData = false
-                return
+        samplesPerSecond: Int? = nil
+    ) throws -> [Float] {
+        if usesDecoder {
+            guard let decoder = audioDecoder, let format = decoderFormat else {
+                throw ExtractionError.invalidSource("Couldn't initialise the audio decoder.")
             }
-            
-            do {
-                audioFile.framePosition = startFrame
-                try audioFile.read(into: rmsBuffer, frameCount: framesPerBuffer)
-            } catch {
-                sendErrorToFlutter(
-                    message: "Couldn't read buffer. \(error.localizedDescription)"
-                )
-                return
-            }
-            
-            guard let floatData = rmsBuffer.floatChannelData else { return }
-            
-            for channel in 0..<channelCount {
-                /// Calculating RMS(Root mean square)
-                var rmsValue: Float = 0.0
-                vDSP_rmsqv(
-                    floatData[channel], 1, &rmsValue,
-                    vDSP_Length(rmsBuffer.frameLength)
-                )
-                await waveformStorage.update(
-                    channel: channel, index: i, value: rmsValue
-                )
-            }
-            
-            startFrame += AVAudioFramePosition(framesPerBuffer)
-            if startFrame + AVAudioFramePosition(framesPerBuffer) > totalFrames {
-                framesPerBuffer = totalFrames - AVAudioFrameCount(startFrame)
-                if framesPerBuffer <= 0 { break }
-            }
-        }
-        
-        audioFile.framePosition = currentFrame
-        let waveformData = await waveformStorage.getData()
-        let data = getChannelMean(data: waveformData)
-        onExtractionComplete(data);
-    }
-
-    func getChannelMean(data: FloatChannelData) -> [Float] {
-        var resultWaveform = [Float]()
-
-        if channelCount == 2, !data[0].isEmpty, !data[1].isEmpty {
-            resultWaveform = zip(data[0], data[1]).map { ($0 + $1) / 2 }
-        } else if !data[0].isEmpty {
-            resultWaveform = data[0]
-        } else if !data[1].isEmpty {
-            resultWaveform = data[1]
-        } else {
-            sendErrorToFlutter(
-                message: "Cannot get waveform mean",
-                details: "Both audio channels are null"
+            let sampleCount = resolvedSampleCount(
+                requestedSamples: samplesPerPixel,
+                samplesPerSecond: samplesPerSecond,
+                frameCount: decoderLength,
+                sampleRate: format.sampleRate
+            )
+            return try extractWithDecoder(
+                decoder,
+                format: format,
+                frameLength: decoderLength,
+                sampleCount: sampleCount
             )
         }
-        return resultWaveform
-    }
 
-    public func cancel() {
-        abortGetWaveformData = true
-    }
-
-    private func sendErrorToFlutter(message: String, details: String? = nil) {
-        DispatchQueue.main.async {
-            self.result(
-                FlutterError(
-                    code: Constants.audioWaveforms,
-                    message: message,
-                    details: details
-                )
-            )
+        guard let audioFile = audioFile else {
+            throw ExtractionError.invalidSource("Couldn't initialise AVAudioFile.")
         }
-    }
-
-    // Extract waveform using SFBAudioEngine decoder for OPUS files
-    private func extractWaveformWithDecoder(
-        samplesPerPixel: Int?,
-        offset: Int? = 0,
-        length: UInt? = nil,
-        onExtractionComplete: ([Float]?) -> Void
-    ) async -> Void {
-        guard let decoder = audioDecoder,
-              let format = decoderFormat else { return }
-
-        let samplesPerPixel = max(1, samplesPerPixel ?? 100)
-        let totalFrames = AVAudioFrameCount(decoderLength)
-        var framesPerBuffer = totalFrames / AVAudioFrameCount(samplesPerPixel)
-
-        guard let rmsBuffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: framesPerBuffer
-        ) else { return }
-
-        let channelCount = Int(format.channelCount)
-        let waveformStorage = WaveformStorage(
-            channelCount: channelCount,
-            size: samplesPerPixel
+        let sampleCount = resolvedSampleCount(
+            requestedSamples: samplesPerPixel,
+            samplesPerSecond: samplesPerSecond,
+            frameCount: audioFile.length,
+            sampleRate: audioFile.processingFormat.sampleRate
         )
-
-        let startIndex = max(0, offset ?? 0)
-        let endIndex = min(
-            samplesPerPixel, startIndex + (length.map { Int($0) } ?? samplesPerPixel)
-        )
-
-        if startIndex > endIndex {
-            sendErrorToFlutter(
-                message: "Offset is larger than total length.",
-                details: "Please select less number of samples"
-            )
-            return
-        }
-
-        var startFrame: AVAudioFramePosition = Int64(startIndex * Int(framesPerBuffer))
-
-        // Seek to start position
         do {
-            try decoder.seek(to: startFrame)
+            return try extractWithAudioFile(audioFile, sampleCount: sampleCount)
+        } catch ExtractionError.cancelled {
+            throw ExtractionError.cancelled
         } catch {
-            sendErrorToFlutter(
-                message: "Couldn't seek to position. \(error.localizedDescription)"
+            // AVAudioFile can open an MP3 successfully but fail when it later
+            // reaches a malformed frame. Retry from the start through
+            // SFBAudioEngine, whose decoder has different error tolerance.
+            return try extractWithFallbackDecoder(
+                requestedSamples: samplesPerPixel,
+                samplesPerSecond: samplesPerSecond,
+                avAudioFileError: error
             )
-            return
+        }
+    }
+
+    private func resolvedSampleCount(
+        requestedSamples: Int?,
+        samplesPerSecond: Int?,
+        frameCount: AVAudioFramePosition,
+        sampleRate: Double
+    ) -> Int {
+        if let samplesPerSecond, samplesPerSecond > 0, sampleRate > 0 {
+            let duration = Double(max(0, frameCount)) / sampleRate
+            let calculated = (duration * Double(samplesPerSecond)).rounded()
+            return max(1, min(Int.max, Int(calculated)))
+        }
+        return max(1, requestedSamples ?? 100)
+    }
+
+    private func extractWithAudioFile(_ audioFile: AVAudioFile, sampleCount: Int) throws -> [Float] {
+        let originalFrame = audioFile.framePosition
+        defer { audioFile.framePosition = originalFrame }
+
+        let totalFrames = Int64(audioFile.length)
+        guard totalFrames > 0 else { return Array(repeating: 0, count: sampleCount) }
+        return try extract(
+            format: audioFile.processingFormat,
+            totalFrames: totalFrames,
+            sampleCount: sampleCount,
+            read: { buffer, frameCount in
+                try audioFile.read(into: buffer, frameCount: frameCount)
+            }
+        )
+    }
+
+    private func extractWithDecoder(
+        _ decoder: AudioDecoder,
+        format: AVAudioFormat,
+        frameLength: AVAudioFramePosition,
+        sampleCount: Int
+    ) throws -> [Float] {
+        let totalFrames = Int64(frameLength)
+        guard totalFrames > 0 else { return Array(repeating: 0, count: sampleCount) }
+        try decoder.seek(to: 0)
+        return try extract(
+            format: format,
+            totalFrames: totalFrames,
+            sampleCount: sampleCount,
+            read: { buffer, frameCount in
+                try decoder.decode(into: buffer, length: frameCount)
+            }
+        )
+    }
+
+    private func extractWithFallbackDecoder(
+        requestedSamples: Int?,
+        samplesPerSecond: Int?,
+        avAudioFileError: Error
+    ) throws -> [Float] {
+        do {
+            let decoder = try AudioDecoder(url: sourceURL)
+            try decoder.open()
+            defer { try? decoder.close() }
+
+            let format = decoder.processingFormat
+            let frameLength = decoder.length
+            let sampleCount = resolvedSampleCount(
+                requestedSamples: requestedSamples,
+                samplesPerSecond: samplesPerSecond,
+                frameCount: frameLength,
+                sampleRate: format.sampleRate
+            )
+            return try extractWithDecoder(
+                decoder,
+                format: format,
+                frameLength: frameLength,
+                sampleCount: sampleCount
+            )
+        } catch ExtractionError.cancelled {
+            throw ExtractionError.cancelled
+        } catch {
+            throw ExtractionError.invalidSource(
+                "AVAudioFile failed while reading: \(avAudioFileError.localizedDescription). " +
+                "SFBAudioEngine fallback also failed: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    /// Reads at most 65k PCM frames at a time. This keeps memory flat for long
+    /// audio while preserving exact RMS for every time bucket.
+    private func extract(
+        format: AVAudioFormat,
+        totalFrames: Int64,
+        sampleCount: Int,
+        read: (AVAudioPCMBuffer, AVAudioFrameCount) throws -> Void
+    ) throws -> [Float] {
+        let channels = Int(format.channelCount)
+        guard channels > 0 else { throw ExtractionError.invalidFormat }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 65_536) else {
+            throw ExtractionError.invalidSource("Couldn't allocate the PCM buffer.")
         }
 
-        for i in startIndex..<endIndex {
-            if abortGetWaveformData {
-                abortGetWaveformData = false
-                return
+        let framesPerBucket: Int64 = max(
+            1,
+            (totalFrames + Int64(sampleCount) - 1) / Int64(sampleCount)
+        )
+        var values = [Float](repeating: 0, count: sampleCount)
+        var decodedFrames: Int64 = 0
+
+        for index in 0..<sampleCount {
+            try throwIfCancelled()
+            if decodedFrames >= totalFrames { break }
+
+            let bucketFrames = min(framesPerBucket, totalFrames - decodedFrames)
+            var remainingFrames = bucketFrames
+            var energy: Float = 0
+            var measuredFrames: Int64 = 0
+
+            while remainingFrames > 0 {
+                try throwIfCancelled()
+                let requested = AVAudioFrameCount(min(Int64(buffer.frameCapacity), remainingFrames))
+                buffer.frameLength = 0
+                try read(buffer, requested)
+                let frameLength = Int64(buffer.frameLength)
+                if frameLength <= 0 { break }
+                guard let channelData = buffer.floatChannelData else {
+                    throw ExtractionError.invalidFormat
+                }
+
+                for channel in 0..<channels {
+                    var channelEnergy: Float = 0
+                    vDSP_svesq(channelData[channel], 1, &channelEnergy, vDSP_Length(frameLength))
+                    energy += channelEnergy
+                }
+                measuredFrames += frameLength * Int64(channels)
+                decodedFrames += frameLength
+                remainingFrames -= frameLength
             }
 
-            do {
-                try decoder.decode(into: rmsBuffer, length: framesPerBuffer)
-            } catch {
-                sendErrorToFlutter(
-                    message: "Couldn't decode buffer. \(error.localizedDescription)"
-                )
-                return
+            if measuredFrames > 0 {
+                values[index] = sqrtf(energy / Float(measuredFrames))
             }
-
-            if rmsBuffer.frameLength == 0 {
-                break
-            }
-
-            guard let floatData = rmsBuffer.floatChannelData else { return }
-
-            for channel in 0..<channelCount {
-                var rmsValue: Float = 0.0
-                vDSP_rmsqv(
-                    floatData[channel], 1, &rmsValue,
-                    vDSP_Length(rmsBuffer.frameLength)
-                )
-                await waveformStorage.update(
-                    channel: channel, index: i, value: rmsValue
-                )
-            }
-
-            startFrame += AVAudioFramePosition(framesPerBuffer)
-            if startFrame + AVAudioFramePosition(framesPerBuffer) > Int64(totalFrames) {
-                framesPerBuffer = totalFrames - AVAudioFrameCount(startFrame)
-                if framesPerBuffer <= 0 { break }
-            }
+            // A decoder reaching EOF early should end extraction, but still
+            // return the requested fixed-size overview with zero tail buckets.
+            if remainingFrames > 0 { break }
         }
-
-        let waveformData = await waveformStorage.getData()
-        let data = getChannelMean(data: waveformData)
-        onExtractionComplete(data)
-    }
-}
-
-actor WaveformStorage {
-    private var data: [[Float]]
-
-    init(channelCount: Int, size: Int) {
-        data = Array(repeating: [Float](repeating: 0, count: size), count: channelCount)
+        return values
     }
 
-    func update(channel: Int, index: Int, value: Float) {
-        data[channel][index] = value
-    }
-
-    func getData() -> [[Float]] {
-        return data
+    private func throwIfCancelled() throws {
+        cancellationLock.lock()
+        let cancelled = isCancelled
+        cancellationLock.unlock()
+        if cancelled { throw ExtractionError.cancelled }
     }
 }

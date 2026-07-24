@@ -87,9 +87,11 @@ class WaveformExtractionController {
     final int actualNoOfSamples;
     if (noOfSamplesPerSecond != null) {
       // A standalone WaveformExtractionController has no PlayerController
-      // with the same key. Android therefore calculates the source duration
-      // inside its extractor instead of calling getDuration(key).
-      if (defaultTargetPlatform == TargetPlatform.android) {
+      // with the same key. Ask the native extractor to calculate the source
+      // duration instead of calling getDuration(key), which has no result for
+      // an unprepared player on iOS.
+      if (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS) {
         return AudioWaveformsInterface.instance.extractWaveformData(
           key: _extractorKey,
           path: path,
