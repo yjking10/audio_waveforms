@@ -15,36 +15,42 @@ class AudioPlayPage extends StatefulWidget {
 
 class _AudioPlayPageState extends State<AudioPlayPage> {
   final PlayerController _playerController = PlayerController();
+  final PlayerPreparationLifecycle _preparationLifecycle =
+      PlayerPreparationLifecycle();
   int _currentMilliseconds = 0;
   int _totalMilliseconds = 0;
+  List<double> _waveformData = [];
   bool _isPreparing = true;
   String? _errorMessage;
 
   StreamSubscription<int>? _currentDurationSubscription;
   StreamSubscription<PlayerState>? _playerStateSubscription;
   StreamSubscription<void>? _completionSubscription;
+  late final Future<void> _preparationFuture;
+
+  bool get _canUpdateUi => mounted && _preparationLifecycle.canUpdateUi;
 
   @override
   void initState() {
     super.initState();
     _currentDurationSubscription =
         _playerController.onCurrentDurationChanged.listen((duration) {
-      if (mounted) {
+      if (_canUpdateUi) {
         setState(() => _currentMilliseconds = duration);
       }
     });
     _playerStateSubscription =
         _playerController.onPlayerStateChanged.listen((_) {
-      if (mounted) {
+      if (_canUpdateUi) {
         setState(() {});
       }
     });
     _completionSubscription = _playerController.onCompletion.listen((_) {
-      if (mounted) {
+      if (_canUpdateUi) {
         setState(() => _currentMilliseconds = _totalMilliseconds);
       }
     });
-    unawaited(_prepareBundledAudio());
+    _preparationFuture = _prepareBundledAudio();
   }
 
   Future<void> _prepareBundledAudio() async {
@@ -59,19 +65,27 @@ class _AudioPlayPageState extends State<AudioPlayPage> {
         ),
       );
 
-      if (!mounted) return;
+      if (!_canUpdateUi) return;
       await _playerController.preparePlayer(
         path: stagedAudio.path,
-        shouldExtractWaveform: true,
+        shouldExtractWaveform: false,
       );
-      if (mounted) {
+      if (!_canUpdateUi) return;
+      await _playerController.setFinishMode(finishMode: FinishMode.pause);
+      if (!_canUpdateUi) return;
+      final waveformData =
+          await _playerController.waveformExtraction.extractWaveformData(
+        path: stagedAudio.path,
+      );
+      if (_canUpdateUi) {
         setState(() {
           _totalMilliseconds = _playerController.maxDuration;
+          _waveformData = waveformData;
           _isPreparing = false;
         });
       }
     } catch (error) {
-      if (mounted) {
+      if (_canUpdateUi) {
         setState(() {
           _errorMessage = 'Unable to prepare bundled audio: $error';
           _isPreparing = false;
@@ -88,7 +102,7 @@ class _AudioPlayPageState extends State<AudioPlayPage> {
         await _playerController.startPlayer();
       }
     } catch (error) {
-      if (mounted) {
+      if (_canUpdateUi) {
         setState(() => _errorMessage = 'Unable to update playback: $error');
       }
     }
@@ -96,11 +110,21 @@ class _AudioPlayPageState extends State<AudioPlayPage> {
 
   @override
   void dispose() {
-    _currentDurationSubscription?.cancel();
-    _playerStateSubscription?.cancel();
-    _completionSubscription?.cancel();
-    _playerController.dispose();
+    _preparationLifecycle.beginDisposing();
+    unawaited(_disposePlayerAfterPreparation());
     super.dispose();
+  }
+
+  Future<void> _disposePlayerAfterPreparation() async {
+    await Future.wait([
+      _currentDurationSubscription?.cancel() ?? Future<void>.value(),
+      _playerStateSubscription?.cancel() ?? Future<void>.value(),
+      _completionSubscription?.cancel() ?? Future<void>.value(),
+    ]);
+    await _preparationLifecycle.cleanUpAfterPreparation(
+      _preparationFuture,
+      _playerController.dispose,
+    );
   }
 
   @override
@@ -134,6 +158,7 @@ class _AudioPlayPageState extends State<AudioPlayPage> {
               size: Size(MediaQuery.sizeOf(context).width - 48, 80),
               playerController: _playerController,
               enableSeekGesture: true,
+              waveformData: _waveformData,
             ),
             const SizedBox(height: 12),
             Row(
@@ -160,4 +185,26 @@ String formatDuration(Duration duration) {
   final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
   final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
   return '$minutes:$seconds';
+}
+
+/// Coordinates async player preparation with synchronous widget disposal.
+class PlayerPreparationLifecycle {
+  var _isDisposing = false;
+
+  bool get canUpdateUi => !_isDisposing;
+
+  void beginDisposing() {
+    _isDisposing = true;
+  }
+
+  Future<void> cleanUpAfterPreparation(
+    Future<void> preparation,
+    void Function() cleanUp,
+  ) async {
+    try {
+      await preparation;
+    } finally {
+      cleanUp();
+    }
+  }
 }

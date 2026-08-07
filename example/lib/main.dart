@@ -108,7 +108,20 @@ class _HomeState extends State<Home> {
         shadowColor: Colors.grey,
         actions: [
           IconButton(
+            icon: const Icon(Icons.audiotrack_outlined),
+            color: Colors.white,
+            iconSize: 28,
+            tooltip: '选择音频文件',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const PlayerPage()),
+              );
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.play_circle_outline),
+            color: Colors.white,
+            iconSize: 28,
             tooltip: '播放示例音频',
             onPressed: () {
               Navigator.of(context).push(
