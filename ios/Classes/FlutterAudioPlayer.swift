@@ -16,10 +16,16 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
     private var hasSentCompletionEvent = false
     private var shouldNotifyCompletionOnStop = false
     private var lastPreparedPath: String?
+    private var activeAudioURL: URL?
+    private var decodeRecoveryAttempts = 0
+    private var isRecoveringFromDecodeError = false
     private var playbackBackend = PlaybackBackend.sfbaudioEngine
 
     private var finishMode: FinishMode = FinishMode.stop
     private var updateFrequency = 200
+    // 连续恢复失败达到上限后停止，避免同一坏帧无限重试。
+    private let maxDecodeRecoveryAttempts = 10
+    private let recoverySkipSeconds: TimeInterval = 0.5
     var plugin: SwiftAudioWaveformsPlugin
     var playerKey: String
     var flutterChannel: FlutterMethodChannel
@@ -205,6 +211,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
     func stopPlayer() {
         cancelCompletionTracking()
         stopListening()
+        isRecoveringFromDecodeError = false
         switch playbackBackend {
         case .sfbaudioEngine:
             player?.stop()
@@ -226,6 +233,8 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
         playbackRate = 1.0
         isPrepared = false
         lastPreparedPath = nil
+        activeAudioURL = nil
+        isRecoveringFromDecodeError = false
         player = nil
         result(true)
     }
@@ -258,7 +267,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
     }
 
     func setVolume(_ volume: Double?, _ result: @escaping FlutterResult) {
-        #if !TARGET_OS_IPHONE
+        #if !os(iOS)
         do {
 //            try player?.setVolume(Float(volume ?? 1.0))
             result(true)
@@ -394,6 +403,9 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
                 Constants.current: Int(ms), Constants.playerKey: playerKey,
             ]
         )
+          print(
+            "currentTimeMs=\(Int(currentTime * 1000)) "
+        )
     }
 
     private func configureAudioSessionForPlayback() throws {
@@ -417,6 +429,9 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
         systemPlayer?.stop()
         systemPlayer = nil
         playbackBackend = .sfbaudioEngine
+        activeAudioURL = audioUrl
+        decodeRecoveryAttempts = 0
+        isRecoveringFromDecodeError = false
 
         if player == nil {
             player = AudioPlayer()
@@ -455,16 +470,21 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
         isPrepared = true
     }
 
+    /// 仅在旧版 iOS 的兼容场景下为特定 MP3 使用 AVAudioPlayer；iOS 17 及以上保留
+    /// SFBAudioEngine，以支持波形、倍速和损坏帧恢复。
     private func shouldUseSystemAudioPlayer(for audioUrl: URL) -> Bool {
+        // 仅对本地 MP3 判断是否需要使用系统播放器，其他格式继续交给 SFBAudioEngine。
         guard audioUrl.isFileURL,
               audioUrl.pathExtension.lowercased() == "mp3" else {
             return false
         }
 
+        // iOS 17 及以上优先使用 SFBAudioEngine，以支持插件的音频处理与容错恢复逻辑。
         if #available(iOS 17.0, *) {
             return false
         }
 
+        // 旧版 iOS 对低采样率或单声道 MP3 的 SFBAudioEngine 兼容性较差，改用系统播放器。
         guard let audioFile = try? AVAudioFile(forReading: audioUrl) else {
             return true
         }
@@ -544,6 +564,8 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
     }
 
     func audioPlayer(_ audioPlayer: AudioPlayer, renderingComplete decoder: PCMDecoding) {
+        logPlaybackSignal("renderingComplete")
+        guard !isRecoveringFromDecodeError else { return }
         handlePlaybackCompletion()
     }
 
@@ -552,21 +574,47 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
         renderingWillComplete decoder: PCMDecoding,
         at hostTime: UInt64
     ) {
+        logPlaybackSignal("renderingWillComplete")
+        guard !isRecoveringFromDecodeError else { return }
         schedulePlaybackCompletion(at: hostTime)
     }
 
     func audioPlayerEndOfAudio(_ audioPlayer: AudioPlayer) {
+        logPlaybackSignal("endOfAudio")
+        guard !isRecoveringFromDecodeError else { return }
         handlePlaybackCompletion()
     }
 
     func audioPlayer(_ audioPlayer: AudioPlayer, nowPlayingChanged nowPlaying: PCMDecoding?) {
+        logPlaybackSignal("nowPlayingChanged isNil=\(nowPlaying == nil)")
+        guard !isRecoveringFromDecodeError else { return }
         if nowPlaying == nil {
             handlePlaybackCompletion()
         }
     }
 
     func audioPlayer(_ audioPlayer: AudioPlayer, playbackStateChanged playbackState: AudioPlayer.PlaybackState) {
-        print("playbackStateChanged ====\(playbackState) shouldNotifyCompletionOnStop=\(shouldNotifyCompletionOnStop)")
+        let currentTime: TimeInterval
+        switch playbackBackend {
+        case .sfbaudioEngine:
+            currentTime = player?.currentTime ?? 0
+        case .systemAudioPlayer:
+            currentTime = systemPlayer?.currentTime ?? 0
+        }
+        print(
+            "playbackStateChanged ====\(playbackState) " +
+            "currentTimeMs=\(Int(currentTime * 1000)) " +
+            "shouldNotifyCompletionOnStop=\(shouldNotifyCompletionOnStop)"
+        )
+        if isRecoveringFromDecodeError {
+            if playbackState == .playing {
+                // A replacement decoder is now rendering. Older stopped events
+                // from the aborted decoder must not finish this playback.
+                isRecoveringFromDecodeError = false
+                decodeRecoveryAttempts = 0
+            }
+            return
+        }
         if playbackState == .stopped && shouldNotifyCompletionOnStop {
             handlePlaybackCompletion(forceStopped: true)
         }
@@ -602,6 +650,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
     }
 
     private func handlePlaybackCompletion(forceStopped: Bool) {
+        logPlaybackSignal("handlePlaybackCompletion forceStopped=\(forceStopped)")
         guard shouldNotifyCompletionOnStop, !hasSentCompletionEvent else { return }
         completionWorkItem?.cancel()
         completionWorkItem = nil
@@ -679,6 +728,85 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
 
     func audioPlayer(_ audioPlayer: AudioPlayer, encounteredError error: Error) {
         print("Audio player error: \(error.localizedDescription)")
+    }
+
+    func audioPlayer(
+        _ audioPlayer: AudioPlayer,
+        decodingAborted decoder: PCMDecoding,
+        error: Error,
+        framesRendered: AVAudioFramePosition
+    ) {
+        logPlaybackSignal(
+            "decodingAborted error=\(error.localizedDescription) framesRendered=\(framesRendered)"
+        )
+        guard case .sfbaudioEngine = playbackBackend,
+              let url = activeAudioURL,
+              url.isFileURL,
+              url.pathExtension.lowercased() == "mp3",
+              decoder.processingFormat.sampleRate > 0 else {
+            handlePlaybackCompletion(forceStopped: true)
+            return
+        }
+
+        guard decodeRecoveryAttempts < maxDecodeRecoveryAttempts else {
+            isRecoveringFromDecodeError = false
+            handlePlaybackCompletion(forceStopped: true)
+            return
+        }
+
+        decodeRecoveryAttempts += 1
+        isRecoveringFromDecodeError = true
+        completionWorkItem?.cancel()
+        completionWorkItem = nil
+
+        // `framesRendered` is expressed in the failed decoder's PCM sample
+        // rate. Convert it to time before creating a replacement decoder:
+        // malformed MP3 headers can cause its PCM sample rate to differ.
+        let resumeTime = Double(framesRendered) / decoder.processingFormat.sampleRate + recoverySkipSeconds
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+
+            do {
+                let replacement = try AudioDecoder(url: url)
+                try replacement.open()
+                let replacementResumeFrame = AVAudioFramePosition(
+                    resumeTime * replacement.processingFormat.sampleRate
+                )
+                guard replacementResumeFrame < replacement.length else {
+                    throw NSError(
+                        domain: Constants.audioWaveforms,
+                        code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "No audio remains after decode failure"]
+                    )
+                }
+
+                try replacement.seek(to: replacementResumeFrame)
+                try self.player?.enqueue(replacement, immediate: true)
+                try self.player?.play()
+                self.startListening()
+            } catch {
+                self.isRecoveringFromDecodeError = false
+                self.handlePlaybackCompletion(forceStopped: true)
+            }
+        }
+    }
+
+    private func logPlaybackSignal(_ signal: String) {
+        let currentTime: TimeInterval
+        switch playbackBackend {
+        case .sfbaudioEngine:
+            currentTime = player?.currentTime ?? 0
+        case .systemAudioPlayer:
+            currentTime = systemPlayer?.currentTime ?? 0
+        }
+        print(
+            "audioPlayerSignal=\(signal) " +
+            "currentTimeMs=\(Int(currentTime * 1000)) " +
+            "recoveryAttempts=\(decodeRecoveryAttempts) " +
+            "isRecovering=\(isRecoveringFromDecodeError) " +
+            "shouldNotifyCompletionOnStop=\(shouldNotifyCompletionOnStop)"
+        )
     }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {

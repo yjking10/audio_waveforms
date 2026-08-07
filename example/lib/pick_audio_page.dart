@@ -38,18 +38,47 @@ class _PlayerPageState extends State<PlayerPage> {
 
   int _loadRequest = 0;
   bool _isExtracting = false;
+  bool _isPickingAudio = false;
+
+  static const _audioExtensions = <String>[
+    'aac',
+    'aiff',
+    'flac',
+    'm4a',
+    'mp3',
+    'ogg',
+    'opus',
+    'wav',
+  ];
 
   Future<void> _pickAudioFile() async {
-    // final sampleCount = playerWaveStyle.getSamplesForWidth(
-    //   MediaQuery.sizeOf(context).width,
-    // );
-    final selection = await FilePicker.platform.pickFiles(
-      type: FileType.audio,
-      allowMultiple: false,
-    );
-    final path = selection?.files.singleOrNull?.path;
-    if (path == null) return;
-    await _loadAudio(path);
+    if (_isPickingAudio) return;
+
+    setState(() => _isPickingAudio = true);
+    try {
+      // On iOS, FileType.audio opens the Media Library picker instead of the
+      // Files document picker. A custom extension filter keeps the audio-only
+      // selection while allowing files outside Apple Music to be chosen.
+      final selection = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: _audioExtensions,
+        allowMultiple: false,
+      );
+      final path = selection?.files.singleOrNull?.path;
+      if (path == null) return;
+      await _loadAudio(path);
+    } catch (error, stackTrace) {
+      debugPrint('Unable to pick audio file: $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('无法选择音频文件：$error')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPickingAudio = false);
+      }
+    }
   }
 
   Future<void> _loadAudio(String path) async {
@@ -126,7 +155,7 @@ class _PlayerPageState extends State<PlayerPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.audio_file),
-            onPressed: _pickAudioFile,
+            onPressed: _isPickingAudio ? null : _pickAudioFile,
             tooltip: '选择音频文件',
           ),
         ],
@@ -229,7 +258,7 @@ class _PlayerPageState extends State<PlayerPage> {
             )
           : Center(
               child: ElevatedButton.icon(
-                onPressed: _pickAudioFile,
+                onPressed: _isPickingAudio ? null : _pickAudioFile,
                 icon: const Icon(Icons.audio_file),
                 label: const Text('选择音频文件'),
               ),

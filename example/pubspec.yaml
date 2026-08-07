@@ -1,9 +1,10 @@
 name: audio_waveforms_example
 description: Demonstrates how to use the audio_waveforms plugin.
+version: 1.0.0+1
 
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -26,7 +27,7 @@ dependencies:
     # the parent directory to use the current plugin's version.
     path: ../
   path_provider: ^2.0.11
-  file_picker: 8.0.7
+  file_picker: ^11.0.3
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -48,7 +49,6 @@ dev_dependencies:
 
 # The following section is specific to Flutter.
 flutter:
-
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
@@ -56,14 +56,15 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
-   - assets/images/logo.png
-   - assets/audios/audio1.mp3
-   - assets/audios/audio2.mp3
-   - assets/audios/audio3.mp3
-   - assets/audios/audio4.mp3
-   - assets/audios/audio5.mp3
-   - assets/audios/test.opus
-
+    - assets/images/logo.png
+    - assets/audios/audio1.mp3
+    - assets/audios/audio2.mp3
+    - assets/audios/audio3.mp3
+    - assets/audios/audio4.mp3
+    - assets/audios/audio5.mp3
+    - assets/audios/test.opus
+    - assets/audios/output22.mp3
+    - assets/audios/test001.mp3
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware.
@@ -90,3 +91,5 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/custom-fonts/#from-packages
+  config:
+    enable-swift-package-manager: false

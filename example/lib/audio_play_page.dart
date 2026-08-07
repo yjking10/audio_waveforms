@@ -55,9 +55,9 @@ class _AudioPlayPageState extends State<AudioPlayPage> {
 
   Future<void> _prepareBundledAudio() async {
     try {
-      final audioData = await rootBundle.load('assets/audios/output22.mp3');
+      final audioData = await rootBundle.load('assets/audios/test001.mp3');
       final temporaryDirectory = await getTemporaryDirectory();
-      final stagedAudio = File('${temporaryDirectory.path}/output22.mp3');
+      final stagedAudio = File('${temporaryDirectory.path}/test001.mp3');
       await stagedAudio.writeAsBytes(
         audioData.buffer.asUint8List(
           audioData.offsetInBytes,
@@ -156,9 +156,15 @@ class _AudioPlayPageState extends State<AudioPlayPage> {
           children: [
             AudioFileWaveforms(
               size: Size(MediaQuery.sizeOf(context).width - 48, 80),
+              backgroundColor: Colors.grey.shade800,
               playerController: _playerController,
               enableSeekGesture: true,
               waveformData: _waveformData,
+              waveformType: WaveformType.fitWidth,
+              playerWaveStyle: PlayerWaveStyle(
+                  fixedWaveColor: Colors.blueAccent,
+                  liveWaveColor: Colors.yellowAccent,
+                  seekLineColor: Colors.red),
             ),
             const SizedBox(height: 12),
             Row(

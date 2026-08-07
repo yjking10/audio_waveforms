@@ -8,8 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'player_page.dart';
 import 'audio_play_page.dart';
+import 'pick_audio_page.dart';
 
 void main() => runApp(const MyApp());
 
@@ -82,7 +82,7 @@ class _HomeState extends State<Home> {
   }
 
   void _pickFile() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles();
+    FilePickerResult? result = await FilePicker.pickFiles();
     if (result != null && result.files.isNotEmpty) {
       paths.add(result.files.first.path!);
       setState(() {});
