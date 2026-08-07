@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'player_page.dart';
+import 'audio_play_page.dart';
 
 void main() => runApp(const MyApp());
 
@@ -107,15 +108,13 @@ class _HomeState extends State<Home> {
         shadowColor: Colors.grey,
         actions: [
           IconButton(
+            icon: const Icon(Icons.play_circle_outline),
+            tooltip: '播放示例音频',
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => PlayerPage()),
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const AudioPlayPage()),
               );
             },
-            icon: Icon(Icons.audiotrack_outlined),
-            color: Colors.white,
-            iconSize: 28,
           ),
         ],
         title: Row(
