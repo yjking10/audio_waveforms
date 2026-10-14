@@ -484,7 +484,7 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
         )
         //   print(
         //     "currentTimeMs=\(Int(currentTime * 1000)) "
-        )
+        // )
     }
 
     private func configureAudioSessionForPlayback() throws {
