@@ -482,8 +482,8 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
                 Constants.current: Int(ms), Constants.playerKey: playerKey,
             ]
         )
-          print(
-            "currentTimeMs=\(Int(currentTime * 1000)) "
+        //   print(
+        //     "currentTimeMs=\(Int(currentTime * 1000)) "
         )
     }
 
@@ -738,11 +738,11 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
         runOnMain { [weak self] in
             guard let self else { return }
             let currentTime = self.player?.currentTime ?? 0
-            print(
-                "playbackStateChanged ====\(playbackState) " +
-                "currentTimeMs=\(Int(currentTime * 1000)) " +
-                "shouldNotifyCompletionOnStop=\(self.shouldNotifyCompletionOnStop)"
-            )
+            // print(
+            //     "playbackStateChanged ====\(playbackState) " +
+            //     "currentTimeMs=\(Int(currentTime * 1000)) " +
+            //     "shouldNotifyCompletionOnStop=\(self.shouldNotifyCompletionOnStop)"
+            // )
             if playbackState == .playing { return }
             guard !self.decodeRecoveryState.isRecovering,
                   playbackState == .stopped,
@@ -924,10 +924,10 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
         completionWorkItem?.cancel()
         completionWorkItem = nil
 
-        print(
-            "decodeRecovery resumeTimeMs=\(Int(recovery.resumeTime * 1000)) " +
-            "framesRendered=\(framesRendered) session=\(recovery.session)"
-        )
+        // print(
+        //     "decodeRecovery resumeTimeMs=\(Int(recovery.resumeTime * 1000)) " +
+        //     "framesRendered=\(framesRendered) session=\(recovery.session)"
+        // )
 
         DispatchQueue.main.async { [weak self] in
             guard let self,
@@ -973,13 +973,13 @@ class FlutterAudioPlayer: NSObject, AudioPlayer.Delegate, AVAudioPlayerDelegate 
         case .systemAudioPlayer:
             currentTime = systemPlayer?.currentTime ?? 0
         }
-        print(
-            "audioPlayerSignal=\(signal) " +
-            "currentTimeMs=\(Int(currentTime * 1000)) " +
-            "recoveryAttempts=\(decodeRecoveryState.attempts) " +
-            "isRecovering=\(decodeRecoveryState.isRecovering) " +
-            "shouldNotifyCompletionOnStop=\(shouldNotifyCompletionOnStop)"
-        )
+        // print(
+        //     "audioPlayerSignal=\(signal) " +
+        //     "currentTimeMs=\(Int(currentTime * 1000)) " +
+        //     "recoveryAttempts=\(decodeRecoveryState.attempts) " +
+        //     "isRecovering=\(decodeRecoveryState.isRecovering) " +
+        //     "shouldNotifyCompletionOnStop=\(shouldNotifyCompletionOnStop)"
+        // )
     }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
